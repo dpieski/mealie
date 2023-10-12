@@ -1,0 +1,102 @@
+{
+    "teaspoon": {
+        "name": "colher de chá",
+        "description": "",
+        "abbreviation": "tsp"
+    },
+    "tablespoon": {
+        "name": "colher de sopa",
+        "description": "",
+        "abbreviation": "tbsp"
+    },
+    "cup": {
+        "name": "chávena",
+        "description": "",
+        "abbreviation": "cup"
+    },
+    "fluid-ounce": {
+        "name": "onça fluida",
+        "description": "",
+        "abbreviation": "fl oz"
+    },
+    "pint": {
+        "name": "pint",
+        "description": "",
+        "abbreviation": "pt"
+    },
+    "quart": {
+        "name": "quarto",
+        "description": "",
+        "abbreviation": "qt"
+    },
+    "gallon": {
+        "name": "galão",
+        "description": "",
+        "abbreviation": "gal"
+    },
+    "milliliter": {
+        "name": "mililitro",
+        "description": "",
+        "abbreviation": "ml"
+    },
+    "liter": {
+        "name": "litro",
+        "description": "",
+        "abbreviation": "l"
+    },
+    "pound": {
+        "name": "libra",
+        "description": "",
+        "abbreviation": "lb"
+    },
+    "ounce": {
+        "name": "onça",
+        "description": "",
+        "abbreviation": "oz"
+    },
+    "gram": {
+        "name": "grama",
+        "description": "",
+        "abbreviation": "g"
+    },
+    "kilogram": {
+        "name": "kilograma",
+        "description": "",
+        "abbreviation": "kg"
+    },
+    "milligram": {
+        "name": "miligrama",
+        "description": "",
+        "abbreviation": "mg"
+    },
+    "splash": {
+        "name": "splash",
+        "description": "",
+        "abbreviation": ""
+    },
+    "dash": {
+        "name": "pitada",
+        "description": "",
+        "abbreviation": ""
+    },
+    "serving": {
+        "name": "dose",
+        "description": "",
+        "abbreviation": ""
+    },
+    "head": {
+        "name": "cabeça",
+        "description": "",
+        "abbreviation": ""
+    },
+    "clove": {
+        "name": "dente",
+        "description": "",
+        "abbreviation": ""
+    },
+    "can": {
+        "name": "lata",
+        "description": "",
+        "abbreviation": ""
+    }
+}

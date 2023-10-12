@@ -1,0 +1,102 @@
+{
+    "teaspoon": {
+        "name": "ملعقة صغيرة",
+        "description": "",
+        "abbreviation": "ملعقة صغيرة"
+    },
+    "tablespoon": {
+        "name": "ملعقة كبيرة",
+        "description": "",
+        "abbreviation": "ملعقة كبيرة"
+    },
+    "cup": {
+        "name": "كوب",
+        "description": "",
+        "abbreviation": "كوب"
+    },
+    "fluid-ounce": {
+        "name": "أوقية 200gm",
+        "description": "",
+        "abbreviation": "أوقية 200gm"
+    },
+    "pint": {
+        "name": "نصف لتر",
+        "description": "",
+        "abbreviation": "نصف لتر"
+    },
+    "quart": {
+        "name": "الربع",
+        "description": "",
+        "abbreviation": "الربع"
+    },
+    "gallon": {
+        "name": "جالون",
+        "description": "",
+        "abbreviation": "جالون"
+    },
+    "milliliter": {
+        "name": "ميليلتر",
+        "description": "",
+        "abbreviation": "مل"
+    },
+    "liter": {
+        "name": "لتر",
+        "description": "",
+        "abbreviation": "لتر"
+    },
+    "pound": {
+        "name": "رطل",
+        "description": "",
+        "abbreviation": "رطل"
+    },
+    "ounce": {
+        "name": "أوقية / ألأونضه",
+        "description": "",
+        "abbreviation": "أونصة"
+    },
+    "gram": {
+        "name": "جرام",
+        "description": "",
+        "abbreviation": "غرام"
+    },
+    "kilogram": {
+        "name": "كيلوغرام",
+        "description": "",
+        "abbreviation": "كيلوغرام"
+    },
+    "milligram": {
+        "name": "مليغرام",
+        "description": "",
+        "abbreviation": "مليغرام"
+    },
+    "splash": {
+        "name": "دفقة",
+        "description": "",
+        "abbreviation": ""
+    },
+    "dash": {
+        "name": "اندفاع",
+        "description": "",
+        "abbreviation": ""
+    },
+    "serving": {
+        "name": "حصة الطعام",
+        "description": "",
+        "abbreviation": ""
+    },
+    "head": {
+        "name": "رأس",
+        "description": "",
+        "abbreviation": ""
+    },
+    "clove": {
+        "name": "القرنفل",
+        "description": "",
+        "abbreviation": ""
+    },
+    "can": {
+        "name": "يمكن",
+        "description": "",
+        "abbreviation": ""
+    }
+}

@@ -1,0 +1,35 @@
+{
+    "generic": {
+        "server-error": "אירעה שגיאה בלתי צפויה"
+    },
+    "recipe": {
+        "unique-name-error": "שמות מתכונים חייבים להיות יחודיים"
+    },
+    "mealplan": {
+        "no-recipes-match-your-rules": "אין מתכון שמתאים לחוקים שלך"
+    },
+    "user": {
+        "user-updated": "המשתמש עודכן",
+        "password-updated": "הסיסמה עודכנה",
+        "invalid-current-password": "סיסמה נוכחית שגויה",
+        "ldap-update-password-unavailable": "כשלון בעדכון סיסמא, המשתמש נשלט ע״י LDAP"
+    },
+    "group": {
+        "report-deleted": "דוח נמחק."
+    },
+    "exceptions": {
+        "permission_denied": "אין לך הרשאות לביצוע פעולה זו",
+        "no-entry-found": "המשאב המבוקש לא נמצא",
+        "integrity-error": "שגיאת שלמות מסד נתונים",
+        "username-conflict-error": "שם המשתמש הזה כבר נמצא בשימוש",
+        "email-conflict-error": "כתובת דואר אלקטרוני זאת כבר נמצאת בשימוש"
+    },
+    "notifications": {
+        "generic-created": "{name} נוצר",
+        "generic-updated": "{name} עודכן",
+        "generic-created-with-url": "{name} נוצר, {url}",
+        "generic-updated-with-url": "{name} עודכן, {url}",
+        "generic-duplicated": "{name} שוכפל",
+        "generic-deleted": "{name} נמחק"
+    }
+}

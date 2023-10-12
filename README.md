@@ -2,8 +2,9 @@
 [![Forks][forks-shield]][forks-url]
 [![Stargazers][stars-shield]][stars-url]
 [![Issues][issues-shield]][issues-url]
-[![MIT License][license-shield]][license-url]
+[![AGPL License][license-shield]][license-url]
 [![Docker Pulls][docker-pull]][docker-pull]
+[![CodeFactor](https://www.codefactor.io/repository/github/hay-kot/mealie/badge)](https://www.codefactor.io/repository/github/hay-kot/mealie)
 
 <!-- PROJECT LOGO -->
 <br />
@@ -19,91 +20,58 @@
   <p align="center">
     A Place for All Your Recipes
     <br />
-    <a href="https://hay-kot.github.io/mealie/"><strong>Explore the docs »</strong></a>
+    <a href="https://nightly.mealie.io"><strong>Explore the docs »</strong></a>
   <a href="https://github.com/hay-kot/mealie">
   </a>
     <br />
-    <a href="https://github.com/hay-kot/mealie"><s>View Demo</s></a>
+    <a href="https://demo.mealie.io/">View Demo</a>
     ·
-    <a href="https://github.com/hay-kot/mealie/issues">Report Bug</a>    
+    <a href="https://github.com/hay-kot/mealie/issues">Report Bug</a>
     ·
-    <a href="https://hay-kot.github.io/mealie/api/docs/">API</a>
-    ·
-    <a href="https://github.com/hay-kot/mealie/issues">
-    Request Feature
-    </a>    
-    ·
-    <a href="https://hub.docker.com/repository/docker/hkotel/mealie"> Docker Hub
+    <a href="https://hub.docker.com/r/hkotel/mealie"> Docker Hub
     </a>
 </p>
 
 
 
-<!-- ABOUT THE PROJECT -->
-## About The Project
 
+[![Product Name Screen Shot][product-screenshot]](https://docs.mealie.io)
 
-[![Product Name Screen Shot][product-screenshot]](https://example.com)
+# About The Project
 
-**Mealie** is a self hosted recipe manager and meal planner with a RestAPI backend and a reactive frontend application built in Vue for a pleasant user experience for the whole family. Easily add recipes into your database by providing the url and mealie will automatically import the relevant data or add a family recipe with the UI editor.  
+Mealie is a self hosted recipe manager and meal planner with a RestAPI backend and a reactive frontend application built in Vue for a pleasant user experience for the whole family. Easily add recipes into your database by providing the url and Mealie will automatically import the relevant data or add a family recipe with the UI editor. Mealie also provides an API for interactions from 3rd party applications.
 
-Mealie also provides a secure API for interactions from 3rd party applications. **Why does my recipe manager need an API?** An API allows integration into applications like [Home Assistant]() that can act as notification engines to provide custom notifications based of Meal Plan data to remind you to defrost the chicken, marinade the steak, or start the CrockPot. See the section on [Meal Plan hooks](#hooks) for more information. Additionally, you can access any available API from the backend server. To explore the API spin up your server and navigate to http://yourserver.com/docs for interactive API documentation. 
-
-
-
-### Main Features
-#### Recipes
-  - Automatic web scrapping for common recipe platforms
-  - Interactive API Documentation thanks to [FastAPI](https://fastapi.tiangolo.com/) and [Swagger](https://petstore.swagger.io/)
-  - UI Recipe Editor
-  - JSON Recipe Editor in browser
-  - Custom tags and categories
-  - Rate recipes
-  - Add notes to recipes
-#### Meal Planner
-  - Random Meal plan generation based off categories
-  - Expose notes in the API to allow external applications to access relevant information for meal plans
-#### Database Import / Export
-  - Easily Import / Export your recipes from the UI
-  - Export recipes in into custom files using Jinja2 templates
-
-### Built With
-
-* [Vue.js](https://vuejs.org/)
-* [Vuetify](https://vuetifyjs.com/en/)
-* [FastAPI](https://fastapi.tiangolo.com/)
-* [MongoDB](https://www.mongodb.com/)
-* [Docker](https://www.docker.com/)
+- [Remember to join the Discord](https://discord.gg/QuStdQGSGK)!
+- [Documentation](https://nightly.mealie.io)
 
 
 <!-- CONTRIBUTING -->
 ## Contributing
 
-Contributions are what make the open source community such an amazing place to be learn, inspire, and create. Any contributions you make are **greatly appreciated**. Especially test. Literally any tests. See the [Contributors Guide](https://hay-kot.github.io/mealie/contributors/developers-guide/code-contributions/) for help getting started.
+Contributions are what make the open source community such an amazing place to be learn, inspire, and create. Any contributions you make are **greatly appreciated**. If you're going to be working on the code-base, you'll want to use the nightly documentation to ensure you get the latest information.
 
-If you are not a coder, you can still contribute financially. financial contributions help me prioritize working on this project over others and helps me know that there is a real demand for project development. 
+- See the [Contributors Guide](https://nightly.mealie.io/contributors/developers-guide/code-contributions/) for help getting started.
+- We use [VSCode Dev Containers](https://code.visualstudio.com/docs/remote/containers) to make it easy for contributors to get started!
 
-<a href="https://www.buymeacoffee.com/haykot" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-green.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
+If you are not a coder, you can still contribute financially. Financial contributions help me prioritize working on this project over others and helps me know that there is a real demand for project development.
+
+<a href="https://www.buymeacoffee.com/haykot" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-green.png" alt="Buy Me A Coffee" style="height: 30px !important;width: 107px !important;" ></a>
 
 <!-- LICENSE -->
 ## License
-
-Distributed under the MIT License. See `LICENSE` for more information.
-
-
-<!-- CONTACT -->
-## Contact
-Project Link: [https://github.com/hay-kot/mealie](https://github.com/hay-kot/mealie)
+Distributed under the AGPL License. See `LICENSE` for more information.
 
 
+## Sponsors
 
-<!-- ACKNOWLEDGEMENTS -->
-## Acknowledgements
+Huge thanks to all the sponsors of this project on [Github Sponsors](https://github.com/sponsors/hay-kot) and Buy Me a Coffee. Without you, this project would surely not be possible.
 
-* [Talk Python Training for helping me learn python](https://training.talkpython.fm/)
-* [Academind for helping me learn Javascript and Vue.js](https://academind.com/)
+Thanks to Linode for providing Hosting for the Demo, Beta, and Documentation sites! Another big thanks to JetBrains for providing their IDEs for development.
 
-
+<div align='center'>
+  <img height="100" src="docs/docs/assets/img/sponsors-linode.svg" />
+  <img height="100" src="docs/docs/assets/img/sponsors-jetbrains.png" />
+</div>
 
 
 
@@ -119,7 +87,7 @@ Project Link: [https://github.com/hay-kot/mealie](https://github.com/hay-kot/mea
 [issues-shield]: https://img.shields.io/github/issues/hay-kot/mealie.svg?style=flat-square
 [issues-url]: https://github.com/hay-kot/mealie/issues
 [license-shield]: https://img.shields.io/github/license/hay-kot/mealie.svg?style=flat-square
-[license-url]: https://github.com/hay-kot/mealie/blob/master/LICENSE.txt
+[license-url]: https://github.com/hay-kot/mealie/blob/mealie-next/LICENSE
 [linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=flat-square&logo=linkedin&colorB=555
 [linkedin-url]: https://linkedin.com/in/hay-kot
-[product-screenshot]: docs/docs/img/home_screenshot.png
+[product-screenshot]: docs/docs/assets/img/home_screenshot.png

@@ -1,71 +1,137 @@
 import uvicorn
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.routing import APIRoute
 
-# import utils.startup as startup
-from app_config import PORT, PRODUCTION, WEB_PATH, docs_url, redoc_url
-from routes import (
-    backup_routes,
-    meal_routes,
-    migration_routes,
-    recipe_routes,
-    setting_routes,
-    static_routes,
-    user_routes,
-)
-from utils.api_docs import generate_api_docs
-from utils.logger import logger
+from mealie.core.config import get_app_settings
+from mealie.core.root_logger import get_logger
+from mealie.core.settings.static import APP_VERSION
+from mealie.routes import router, spa, utility_routes
+from mealie.routes.handlers import register_debug_handler
+from mealie.routes.media import media_router
+from mealie.services.scheduler import SchedulerRegistry, SchedulerService, tasks
+
+settings = get_app_settings()
+
+description = f"""
+Mealie is a web application for managing your recipes, meal plans, and shopping lists. This is the Restful
+API interactive documentation that can be used to explore the API. If you're justing getting started with
+the API and want to get started quickly, you can use the
+[API Usage | Mealie Docs](https://hay-kot.github.io/mealie/documentation/getting-started/api-usage/)
+as a reference for how to get started.
+
+
+As of this release <b>{APP_VERSION}</b>, Mealie is still in rapid development and therefore some of these APIs may
+change from version to version.
+
+
+If you have any questions or comments about mealie, please use the discord server to talk to the developers or other
+community members. If you'd like to file an issue, please use the
+[GitHub Issue Tracker | Mealie](https://github.com/hay-kot/mealie/issues/new/choose)
+
+
+## Helpful Links
+- [Home Page](https://mealie.io)
+- [Documentation](https://hay-kot.github.io/mealie/)
+- [Discord](https://discord.gg/QuStdQGSGK)
+- [Demo](https://demo.mealie.io)
+- [Beta](https://demo.mealie.io)
+"""
 
 app = FastAPI(
     title="Mealie",
-    description="A place for all your recipes",
-    version="0.0.1",
-    docs_url=docs_url,
-    redoc_url=redoc_url,
+    description=description,
+    version=APP_VERSION,
+    docs_url=settings.DOCS_URL,
+    redoc_url=settings.REDOC_URL,
 )
 
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-def mount_static_files():
-    app.mount("/static", StaticFiles(directory=WEB_PATH, html=True))
+register_debug_handler(app)
+
+
+async def start_scheduler():
+    SchedulerRegistry.register_daily(
+        tasks.purge_group_registration,
+        tasks.purge_password_reset_tokens,
+        tasks.purge_group_data_exports,
+        tasks.create_mealplan_timeline_events,
+        tasks.delete_old_checked_list_items,
+    )
+
+    SchedulerRegistry.register_minutely(
+        tasks.post_group_webhooks,
+    )
+
+    SchedulerRegistry.register_hourly(
+        tasks.locked_user_reset,
+    )
+
+    SchedulerRegistry.print_jobs()
+
+    await SchedulerService.start()
 
 
 def api_routers():
-    # First
-    app.include_router(recipe_routes.router)
-    app.include_router(meal_routes.router)
-    app.include_router(setting_routes.router)
-    app.include_router(backup_routes.router)
-    app.include_router(user_routes.router)
-    app.include_router(migration_routes.router)
+    app.include_router(router)
+    app.include_router(media_router)
+    app.include_router(utility_routes.router)
 
+    if settings.PRODUCTION and not settings.TESTING:
+        spa.mount_spa(app)
 
-if PRODUCTION:
-    mount_static_files()
 
 api_routers()
 
-# API 404 Catch all CALL AFTER ROUTERS
-@app.get("/api/{full_path:path}", status_code=404, include_in_schema=False)
-def invalid_api():
-    return None
+# fix routes that would get their tags duplicated by use of @controller,
+# leading to duplicate definitions in the openapi spec
+for route in app.routes:
+    if isinstance(route, APIRoute):
+        route.tags = list(set(route.tags))
 
 
-app.include_router(static_routes.router)
+@app.on_event("startup")
+async def system_startup():
+    logger = get_logger()
+
+    await start_scheduler()
+
+    logger.info("-----SYSTEM STARTUP----- \n")
+    logger.info("------APP SETTINGS------")
+    logger.info(
+        settings.json(
+            indent=4,
+            exclude={
+                "SECRET",
+                "DEFAULT_PASSWORD",
+                "SFTP_PASSWORD",
+                "SFTP_USERNAME",
+                "DB_URL",  # replace by DB_URL_PUBLIC for logs
+                "POSTGRES_USER",
+                "POSTGRES_PASSWORD",
+                "SMTP_USER",
+                "SMTP_PASSWORD",
+            },
+        )
+    )
 
 
-# Generate API Documentation
-# if not PRODUCTION:
-#     generate_api_docs(app)
-
-if __name__ == "__main__":
-    logger.info("-----SYSTEM STARTUP-----")
-
+def main():
     uvicorn.run(
         "app:app",
         host="0.0.0.0",
-        port=PORT,
+        port=settings.API_PORT,
         reload=True,
-        debug=True,
+        reload_dirs=["mealie"],
+        reload_delay=2,
+        log_level="info",
+        use_colors=True,
+        log_config=None,
         workers=1,
         forwarded_allow_ips="*",
     )
+
+
+if __name__ == "__main__":
+    main()

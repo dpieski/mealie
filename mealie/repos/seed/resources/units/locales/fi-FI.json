@@ -1,0 +1,102 @@
+{
+    "teaspoon": {
+        "name": "teelusikka",
+        "description": "",
+        "abbreviation": "tl"
+    },
+    "tablespoon": {
+        "name": "ruokalusikka",
+        "description": "",
+        "abbreviation": "rkl"
+    },
+    "cup": {
+        "name": "kuppi",
+        "description": "",
+        "abbreviation": "kuppi"
+    },
+    "fluid-ounce": {
+        "name": "nesteunssi",
+        "description": "",
+        "abbreviation": "fl oz"
+    },
+    "pint": {
+        "name": "tuoppi",
+        "description": "",
+        "abbreviation": "pt"
+    },
+    "quart": {
+        "name": "kvartti",
+        "description": "",
+        "abbreviation": "qt"
+    },
+    "gallon": {
+        "name": "gallona",
+        "description": "",
+        "abbreviation": "gal"
+    },
+    "milliliter": {
+        "name": "millilitra",
+        "description": "",
+        "abbreviation": "ml"
+    },
+    "liter": {
+        "name": "litra",
+        "description": "",
+        "abbreviation": "l"
+    },
+    "pound": {
+        "name": "pauna",
+        "description": "",
+        "abbreviation": "lb"
+    },
+    "ounce": {
+        "name": "unssi",
+        "description": "",
+        "abbreviation": "oz"
+    },
+    "gram": {
+        "name": "gramma",
+        "description": "",
+        "abbreviation": "g"
+    },
+    "kilogram": {
+        "name": "kilogramma",
+        "description": "",
+        "abbreviation": "kg"
+    },
+    "milligram": {
+        "name": "milligramma",
+        "description": "",
+        "abbreviation": "mg"
+    },
+    "splash": {
+        "name": "tilkka",
+        "description": "",
+        "abbreviation": ""
+    },
+    "dash": {
+        "name": "ripaus",
+        "description": "",
+        "abbreviation": ""
+    },
+    "serving": {
+        "name": "annos",
+        "description": "",
+        "abbreviation": ""
+    },
+    "head": {
+        "name": "pää",
+        "description": "",
+        "abbreviation": ""
+    },
+    "clove": {
+        "name": "kynsi",
+        "description": "",
+        "abbreviation": ""
+    },
+    "can": {
+        "name": "tölkki",
+        "description": "",
+        "abbreviation": ""
+    }
+}

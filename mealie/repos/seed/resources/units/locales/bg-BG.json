@@ -1,0 +1,102 @@
+{
+    "teaspoon": {
+        "name": "чаена лъжичка",
+        "description": "",
+        "abbreviation": "ч.л."
+    },
+    "tablespoon": {
+        "name": "супена лъжица",
+        "description": "",
+        "abbreviation": "с.л."
+    },
+    "cup": {
+        "name": "cup",
+        "description": "",
+        "abbreviation": "cup"
+    },
+    "fluid-ounce": {
+        "name": "fluid ounce",
+        "description": "",
+        "abbreviation": "fl oz"
+    },
+    "pint": {
+        "name": "pint",
+        "description": "",
+        "abbreviation": "pt"
+    },
+    "quart": {
+        "name": "quart",
+        "description": "",
+        "abbreviation": "qt"
+    },
+    "gallon": {
+        "name": "gallon",
+        "description": "",
+        "abbreviation": "gal"
+    },
+    "milliliter": {
+        "name": "милилитър",
+        "description": "",
+        "abbreviation": "ml"
+    },
+    "liter": {
+        "name": "литър",
+        "description": "",
+        "abbreviation": "л"
+    },
+    "pound": {
+        "name": "pound",
+        "description": "",
+        "abbreviation": "lb"
+    },
+    "ounce": {
+        "name": "ounce",
+        "description": "",
+        "abbreviation": "oz"
+    },
+    "gram": {
+        "name": "грам",
+        "description": "",
+        "abbreviation": "гр"
+    },
+    "kilogram": {
+        "name": "килограм",
+        "description": "",
+        "abbreviation": "кг"
+    },
+    "milligram": {
+        "name": "милиграм",
+        "description": "",
+        "abbreviation": "мг"
+    },
+    "splash": {
+        "name": "плисък",
+        "description": "",
+        "abbreviation": ""
+    },
+    "dash": {
+        "name": "щипка",
+        "description": "",
+        "abbreviation": ""
+    },
+    "serving": {
+        "name": "порция",
+        "description": "",
+        "abbreviation": ""
+    },
+    "head": {
+        "name": "глава",
+        "description": "",
+        "abbreviation": ""
+    },
+    "clove": {
+        "name": "скилидка",
+        "description": "",
+        "abbreviation": ""
+    },
+    "can": {
+        "name": "консерва",
+        "description": "",
+        "abbreviation": ""
+    }
+}

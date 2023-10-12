@@ -1,0 +1,102 @@
+{
+    "teaspoon": {
+        "name": "colher de chá",
+        "description": "",
+        "abbreviation": "col. de chá"
+    },
+    "tablespoon": {
+        "name": "colher de sopa",
+        "description": "",
+        "abbreviation": "col. de sopa"
+    },
+    "cup": {
+        "name": "xícara",
+        "description": "",
+        "abbreviation": "xíc."
+    },
+    "fluid-ounce": {
+        "name": "onça fluida",
+        "description": "",
+        "abbreviation": "fl oz"
+    },
+    "pint": {
+        "name": "pint",
+        "description": "",
+        "abbreviation": "pt"
+    },
+    "quart": {
+        "name": "quart",
+        "description": "",
+        "abbreviation": "qt"
+    },
+    "gallon": {
+        "name": "galão",
+        "description": "",
+        "abbreviation": "gal"
+    },
+    "milliliter": {
+        "name": "mililitro",
+        "description": "",
+        "abbreviation": "ml"
+    },
+    "liter": {
+        "name": "litro",
+        "description": "",
+        "abbreviation": "l"
+    },
+    "pound": {
+        "name": "libra",
+        "description": "",
+        "abbreviation": "lb"
+    },
+    "ounce": {
+        "name": "onça",
+        "description": "",
+        "abbreviation": "oz"
+    },
+    "gram": {
+        "name": "grama",
+        "description": "",
+        "abbreviation": "g"
+    },
+    "kilogram": {
+        "name": "kilograma",
+        "description": "",
+        "abbreviation": "kg"
+    },
+    "milligram": {
+        "name": "miligrama",
+        "description": "",
+        "abbreviation": "mg"
+    },
+    "splash": {
+        "name": "punhado",
+        "description": "",
+        "abbreviation": ""
+    },
+    "dash": {
+        "name": "pitada",
+        "description": "",
+        "abbreviation": ""
+    },
+    "serving": {
+        "name": "porção",
+        "description": "",
+        "abbreviation": ""
+    },
+    "head": {
+        "name": "cabeça",
+        "description": "",
+        "abbreviation": ""
+    },
+    "clove": {
+        "name": "cravo",
+        "description": "",
+        "abbreviation": ""
+    },
+    "can": {
+        "name": "lata",
+        "description": "",
+        "abbreviation": ""
+    }
+}

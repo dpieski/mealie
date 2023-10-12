@@ -1,0 +1,102 @@
+{
+    "teaspoon": {
+        "name": "çay kaşığı",
+        "description": "",
+        "abbreviation": "tsp"
+    },
+    "tablespoon": {
+        "name": "yemek kaşığı",
+        "description": "",
+        "abbreviation": "tbsp"
+    },
+    "cup": {
+        "name": "fincan",
+        "description": "",
+        "abbreviation": "fincan"
+    },
+    "fluid-ounce": {
+        "name": "sıvı ons",
+        "description": "",
+        "abbreviation": "sıvı ons"
+    },
+    "pint": {
+        "name": "pint",
+        "description": "",
+        "abbreviation": "pt"
+    },
+    "quart": {
+        "name": "1/4 galon",
+        "description": "",
+        "abbreviation": "1/4 galon"
+    },
+    "gallon": {
+        "name": "galon",
+        "description": "",
+        "abbreviation": "galon"
+    },
+    "milliliter": {
+        "name": "mililitre",
+        "description": "",
+        "abbreviation": "ml"
+    },
+    "liter": {
+        "name": "litre",
+        "description": "",
+        "abbreviation": "l"
+    },
+    "pound": {
+        "name": "pound",
+        "description": "",
+        "abbreviation": "lb"
+    },
+    "ounce": {
+        "name": "ons",
+        "description": "",
+        "abbreviation": "oz"
+    },
+    "gram": {
+        "name": "gram",
+        "description": "",
+        "abbreviation": "gr"
+    },
+    "kilogram": {
+        "name": "kilogram",
+        "description": "",
+        "abbreviation": "kg"
+    },
+    "milligram": {
+        "name": "miligram",
+        "description": "",
+        "abbreviation": "mg"
+    },
+    "splash": {
+        "name": "serpme",
+        "description": "",
+        "abbreviation": ""
+    },
+    "dash": {
+        "name": "tutam",
+        "description": "",
+        "abbreviation": ""
+    },
+    "serving": {
+        "name": "porsiyon",
+        "description": "",
+        "abbreviation": ""
+    },
+    "head": {
+        "name": "baş",
+        "description": "",
+        "abbreviation": ""
+    },
+    "clove": {
+        "name": "diş",
+        "description": "",
+        "abbreviation": ""
+    },
+    "can": {
+        "name": "teneke kutu",
+        "description": "",
+        "abbreviation": ""
+    }
+}

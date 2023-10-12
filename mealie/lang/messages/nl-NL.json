@@ -1,0 +1,35 @@
+{
+    "generic": {
+        "server-error": "Er is een onverwachte fout opgetreden"
+    },
+    "recipe": {
+        "unique-name-error": "Receptnamen moeten uniek zijn"
+    },
+    "mealplan": {
+        "no-recipes-match-your-rules": "Geen recepten die overeenkomen met je regels"
+    },
+    "user": {
+        "user-updated": "Gebruiker bijgewerkt",
+        "password-updated": "Wachtwoord bijgewerkt",
+        "invalid-current-password": "Ongeldig huidig wachtwoord",
+        "ldap-update-password-unavailable": "Kan het wachtwoord niet bijwerken. De gebruiker wordt beheerd door LDAP."
+    },
+    "group": {
+        "report-deleted": "Rapport verwijderd."
+    },
+    "exceptions": {
+        "permission_denied": "Je hebt geen toestemming om deze actie uit te voeren",
+        "no-entry-found": "Het opgevraagde is niet gevonden",
+        "integrity-error": "Integriteitsprobleem voor database",
+        "username-conflict-error": "Deze gebruikersnaam is al in gebruik",
+        "email-conflict-error": "Dit e-mailadres is al in gebruik"
+    },
+    "notifications": {
+        "generic-created": "{name} is aangemaakt",
+        "generic-updated": "{name} is bijgewerkt",
+        "generic-created-with-url": "{name} is aangemaakt, {url}",
+        "generic-updated-with-url": "{name} is bijgewerkt, {url}",
+        "generic-duplicated": "(naam) is gekopieerd",
+        "generic-deleted": "{name} is verwijderd"
+    }
+}

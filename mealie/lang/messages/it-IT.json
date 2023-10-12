@@ -1,0 +1,35 @@
+{
+    "generic": {
+        "server-error": "Si è verificato un errore inaspettato"
+    },
+    "recipe": {
+        "unique-name-error": "I nomi delle ricette devono essere unici"
+    },
+    "mealplan": {
+        "no-recipes-match-your-rules": "Nessuna ricetta corrisponde alle tue regole"
+    },
+    "user": {
+        "user-updated": "Utente Aggiornato",
+        "password-updated": "Password aggiornata",
+        "invalid-current-password": "Password attuale non valida",
+        "ldap-update-password-unavailable": "Impossibile aggiornare la password, l'utente è controllato da LDAP"
+    },
+    "group": {
+        "report-deleted": "Report eliminato."
+    },
+    "exceptions": {
+        "permission_denied": "Non hai i permessi per eseguire quest'azione",
+        "no-entry-found": "La risorsa richiesta non è stata trovata",
+        "integrity-error": "Errore di integrità del database",
+        "username-conflict-error": "Questo nome utente è già in uso",
+        "email-conflict-error": "Questo indirizzo email è già utilizzato"
+    },
+    "notifications": {
+        "generic-created": "{name} è stato creato",
+        "generic-updated": "{name} è stato aggiornato",
+        "generic-created-with-url": "{name} è stato creato, {url}",
+        "generic-updated-with-url": "{name} è stato aggiornato, {url}",
+        "generic-duplicated": "{name} è stato duplicato",
+        "generic-deleted": "{name} è stato eliminato"
+    }
+}

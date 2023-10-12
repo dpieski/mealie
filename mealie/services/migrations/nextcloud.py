@@ -1,89 +1,120 @@
-import json
-import logging
-import shutil
+import tempfile
 import zipfile
+from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
+from typing import cast
 
-from services.recipe_services import Recipe
-from services.scrape_services import normalize_data, process_recipe_data
-from app_config import IMG_DIR, TEMP_DIR
+import isodate
+from isodate.isoerror import ISO8601Error
+from slugify import slugify
 
-CWD = Path(__file__).parent
-MIGRTAION_DIR = CWD.parent.parent.joinpath("data", "migration")
-
-
-def process_selection(selection: Path) -> Path:
-    if selection.is_dir():
-        return selection
-    elif selection.suffix == ".zip":
-        with zipfile.ZipFile(selection, "r") as zip_ref:
-            nextcloud_dir = TEMP_DIR.joinpath("nextcloud")
-            nextcloud_dir.mkdir(exist_ok=False, parents=True)
-            zip_ref.extractall(nextcloud_dir)
-        return nextcloud_dir
-    else:
-        return None
+from ._migration_base import BaseMigrator
+from .utils.migration_alias import MigrationAlias
+from .utils.migration_helpers import MigrationReaders, glob_walker, import_image, split_by_comma
 
 
-def import_recipes(recipe_dir: Path) -> Recipe:
-    image = False
-    for file in recipe_dir.glob("full.*"):
-        image = file
+@dataclass
+class NextcloudDir:
+    name: str
+    recipe: dict
+    image: Path | None
 
-    recipe_file = recipe_dir.joinpath("recipe.json")
+    @property
+    def slug(self):
+        return slugify(self.recipe.get("name"))
 
-    with open(recipe_file, "r") as f:
-        recipe_dict = json.loads(f.read())
+    @classmethod
+    def from_dir(cls, dir: Path):
+        try:
+            json_file = next(dir.glob("*.json"))
+        except StopIteration:
+            return None
 
-    recipe_dict = process_recipe_data(recipe_dict)
-    recipe_data = normalize_data(recipe_dict)
+        try:  # TODO: There's got to be a better way to do this.
+            image_file = next(dir.glob("full.*"))
+        except StopIteration:
+            image_file = None
 
-    image_name = None
-    if image:
-        image_name = recipe_data["slug"] + image.suffix
-        recipe_data["image"] = image_name
-    else:
-        recipe_data["image"] = "none"
-
-    recipe = Recipe(**recipe_data)
-
-    if image:
-        shutil.copy(image, IMG_DIR.joinpath(image_name))
-
-    return recipe
+        return cls(name=dir.name, recipe=MigrationReaders.json(json_file), image=image_file)
 
 
-def prep():
-    try:
-        shutil.rmtree(TEMP_DIR)
-    except:
-        pass
-    TEMP_DIR.mkdir(exist_ok=True, parents=True)
+class NextcloudMigrator(BaseMigrator):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        self.name = "nextcloud"
+
+        self.key_aliases = [
+            MigrationAlias(key="tags", alias="keywords", func=split_by_comma),
+            MigrationAlias(key="orgURL", alias="url", func=None),
+            MigrationAlias(key="totalTime", alias="totalTime", func=parse_time),
+            MigrationAlias(key="prepTime", alias="prepTime", func=parse_time),
+            MigrationAlias(key="performTime", alias="cookTime", func=parse_time),
+        ]
+
+    def _migrate(self) -> None:
+        # Unzip File into temp directory
+
+        # get potential recipe dirs
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with zipfile.ZipFile(self.archive) as zip_file:
+                zip_file.extractall(tmpdir)
+
+            potential_recipe_dirs = glob_walker(Path(tmpdir), glob_str="**/[!.]*.json", return_parent=True)
+            nextcloud_dirs = {y.slug: y for x in potential_recipe_dirs if (y := NextcloudDir.from_dir(x))}
+
+            all_recipes = []
+            for _, nc_dir in nextcloud_dirs.items():
+                recipe = self.clean_recipe_dictionary(nc_dir.recipe)
+                all_recipes.append(recipe)
+
+            all_statuses = self.import_recipes_to_database(all_recipes)
+
+            for slug, recipe_id, status in all_statuses:
+                if status:
+                    nc_dir = nextcloud_dirs[slug]
+                    if nc_dir.image:
+                        import_image(nc_dir.image, recipe_id)
 
 
-def cleanup():
-    shutil.rmtree(TEMP_DIR)
+def parse_time(time: str | None) -> str:
+    """
+    Parses an ISO8601 duration string
 
+    https://en.wikipedia.org/wiki/ISO_8601#Durations
+    """
 
-def migrate(selection: str):
-    prep()
-    MIGRTAION_DIR.mkdir(exist_ok=True)
-    selection = MIGRTAION_DIR.joinpath(selection)
+    if not time:
+        return ""
+    if time[0] == "P":
+        try:
+            delta = isodate.parse_duration(time)
+            if not isinstance(delta, timedelta):
+                return time
+        except ISO8601Error:
+            return time
 
-    nextcloud_dir = process_selection(selection)
+    # TODO: make singular and plural translatable
+    time_part_map = {
+        "days": {"singular": "day", "plural": "days"},
+        "hours": {"singular": "hour", "plural": "hours"},
+        "minutes": {"singular": "minute", "plural": "minutes"},
+        "seconds": {"singular": "second", "plural": "seconds"},
+    }
 
-    successful_imports = []
-    failed_imports = []
-    for dir in nextcloud_dir.iterdir():
-        if dir.is_dir():
-            try:
-                recipe = import_recipes(dir)
-                recipe.save_to_db()
-                successful_imports.append(recipe.name)
-            except:
-                logging.error(f"Failed Nextcloud Import: {dir.name}")
-                failed_imports.append(dir.name)
+    delta = cast(timedelta, delta)
+    time_part_map["days"]["value"] = delta.days
+    time_part_map["hours"]["value"] = delta.seconds // 3600
+    time_part_map["minutes"]["value"] = (delta.seconds // 60) % 60
+    time_part_map["seconds"]["value"] = delta.seconds % 60
 
-    cleanup()
+    return_strings: list[str] = []
+    for value_map in time_part_map.values():
+        if not (value := value_map["value"]):
+            continue
 
-    return {"successful": successful_imports, "failed": failed_imports}
+        unit_key = "singular" if value == 1 else "plural"
+        return_strings.append(f"{value} {value_map[unit_key]}")
+
+    return " ".join(return_strings) if return_strings else time

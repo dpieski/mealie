@@ -1,0 +1,35 @@
+{
+    "generic": {
+        "server-error": "Der opstod en uventet fejl"
+    },
+    "recipe": {
+        "unique-name-error": "Opskriftsnavnet er allerede i brug"
+    },
+    "mealplan": {
+        "no-recipes-match-your-rules": "Ingen opskrifter matcher dine regler"
+    },
+    "user": {
+        "user-updated": "Bruger opdateret",
+        "password-updated": "Adgangskoden blev opdateret",
+        "invalid-current-password": "Ugyldig nuværende adgangskode",
+        "ldap-update-password-unavailable": "Kan ikke opdatere adgangskoden, brugeren styres af LDAP"
+    },
+    "group": {
+        "report-deleted": "Rapporten er slettet."
+    },
+    "exceptions": {
+        "permission_denied": "Du har ikke tilladelse til at udføre denne handling",
+        "no-entry-found": "Siden kunne ikke findes",
+        "integrity-error": "Databaseintegritetsfejl",
+        "username-conflict-error": "Dette brugernavn er allerede i brug",
+        "email-conflict-error": "Denne e-mail er allerede i brug"
+    },
+    "notifications": {
+        "generic-created": "{name} blev oprettet",
+        "generic-updated": "{name} blev opdateret",
+        "generic-created-with-url": "{name} er oprettet, {url}",
+        "generic-updated-with-url": "{name} er blevet opdateret, {url}",
+        "generic-duplicated": "{name} er blevet dublikeret",
+        "generic-deleted": "{name} er blevet slettet"
+    }
+}

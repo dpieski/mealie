@@ -1,0 +1,35 @@
+{
+    "generic": {
+        "server-error": "Възникна неочаквана грешка"
+    },
+    "recipe": {
+        "unique-name-error": "Името на рецептата трябва да е уникално"
+    },
+    "mealplan": {
+        "no-recipes-match-your-rules": "No recipes match your rules"
+    },
+    "user": {
+        "user-updated": "User updated",
+        "password-updated": "Password updated",
+        "invalid-current-password": "Invalid current password",
+        "ldap-update-password-unavailable": "Unable to update password, user is controlled by LDAP"
+    },
+    "group": {
+        "report-deleted": "Report deleted."
+    },
+    "exceptions": {
+        "permission_denied": "Нямата права за това действие",
+        "no-entry-found": "Търсената страница не е намерена",
+        "integrity-error": "Проверка на интегритета на данните",
+        "username-conflict-error": "Потребителското име вече е заето",
+        "email-conflict-error": "Този имейл адрес вече се използва"
+    },
+    "notifications": {
+        "generic-created": "{name} беше създадено",
+        "generic-updated": "{name} беше актуализирано",
+        "generic-created-with-url": "{name} беше създадено, {url}",
+        "generic-updated-with-url": "{name} беше актуализирано, {url}",
+        "generic-duplicated": "{name} е дублицирано",
+        "generic-deleted": "{name} беше изтрито"
+    }
+}

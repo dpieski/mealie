@@ -1,0 +1,102 @@
+{
+    "teaspoon": {
+        "name": "小さじ",
+        "description": "",
+        "abbreviation": "小さじ"
+    },
+    "tablespoon": {
+        "name": "大さじ",
+        "description": "",
+        "abbreviation": "大さじ"
+    },
+    "cup": {
+        "name": "カップ",
+        "description": "",
+        "abbreviation": "カップ"
+    },
+    "fluid-ounce": {
+        "name": "fluid ounce",
+        "description": "",
+        "abbreviation": "fl oz"
+    },
+    "pint": {
+        "name": "pint",
+        "description": "",
+        "abbreviation": "pt"
+    },
+    "quart": {
+        "name": "quart",
+        "description": "",
+        "abbreviation": "qt"
+    },
+    "gallon": {
+        "name": "gallon",
+        "description": "",
+        "abbreviation": "gal"
+    },
+    "milliliter": {
+        "name": "ミリリットル",
+        "description": "",
+        "abbreviation": "ml"
+    },
+    "liter": {
+        "name": "リットル",
+        "description": "",
+        "abbreviation": "l"
+    },
+    "pound": {
+        "name": "pound",
+        "description": "",
+        "abbreviation": "lb"
+    },
+    "ounce": {
+        "name": "ounce",
+        "description": "",
+        "abbreviation": "oz"
+    },
+    "gram": {
+        "name": "グラム",
+        "description": "",
+        "abbreviation": "g"
+    },
+    "kilogram": {
+        "name": "kilogram",
+        "description": "",
+        "abbreviation": "kg"
+    },
+    "milligram": {
+        "name": "ミリグラム",
+        "description": "",
+        "abbreviation": "mg"
+    },
+    "splash": {
+        "name": "splash",
+        "description": "",
+        "abbreviation": ""
+    },
+    "dash": {
+        "name": "dash",
+        "description": "",
+        "abbreviation": ""
+    },
+    "serving": {
+        "name": "serving",
+        "description": "",
+        "abbreviation": ""
+    },
+    "head": {
+        "name": "head",
+        "description": "",
+        "abbreviation": ""
+    },
+    "clove": {
+        "name": "clove",
+        "description": "",
+        "abbreviation": ""
+    },
+    "can": {
+        "name": "缶",
+        "description": "",
+        "abbreviation": ""
+    }
+}

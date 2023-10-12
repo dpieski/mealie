@@ -1,0 +1,35 @@
+{
+    "generic": {
+        "server-error": "Tapahtui odottamaton virhe"
+    },
+    "recipe": {
+        "unique-name-error": "Reseptien nimien täytyy olla yksilöllisiä"
+    },
+    "mealplan": {
+        "no-recipes-match-your-rules": "Määritysten mukaisia reseptejä ei löytynyt"
+    },
+    "user": {
+        "user-updated": "Käyttäjä päivitetty",
+        "password-updated": "Salasana päivitetty",
+        "invalid-current-password": "Nykyinen salasana ei kelpaa",
+        "ldap-update-password-unavailable": "Salasanaa ei voitu päivittää. Käyttäjä hallinnoi LDAP:ia."
+    },
+    "group": {
+        "report-deleted": "Raportti poistettu."
+    },
+    "exceptions": {
+        "permission_denied": "Sinulla ei ole oikeutta tämän toiminnon suorittamiseen",
+        "no-entry-found": "Pyydettyä resurssia ei löytynyt",
+        "integrity-error": "Tietokannan eheysvirhe",
+        "username-conflict-error": "Tämä käyttäjätunnus on jo käytössä",
+        "email-conflict-error": "Tämä sähköpostiosoite on jo käytössä"
+    },
+    "notifications": {
+        "generic-created": "{name} luotiin",
+        "generic-updated": "{name} päivitettiin",
+        "generic-created-with-url": "{name} on luotu, {url}",
+        "generic-updated-with-url": "{name} on päivitetty, {url}",
+        "generic-duplicated": "{name} on kahdennettu",
+        "generic-deleted": "{name} on poistettu"
+    }
+}

@@ -1,15 +1,16 @@
-# Contributing with translations
+# Contributing with Translations
+Translations can be a great way **for non-coders** to contribute to project.
+We use **[Crowdin](https://crowdin.com/project/mealie)** to allow several contributors to work on translating Mealie.
+You can simply help by voting for your preferred translations, or even by completely translating Mealie into a new language.
 
-Having Mealie in different language could help the adaption of Mealie. Translations can be a great way for non-coders to contribute to Mealie.
+Translations are regularly pulled from Crowdin and included in each new release.
 
-## Is Mealie missing in your language?
-If your language is missing, you can add it, by beginning to translate. We use a Vue-i18n in json files. Copy frontend/src/locales/en.json to get started.
+Please use Crowdin as much as possible if you have any question/issue regarding a particular string. You can take a look at [Crowdin Knowledge base](https://support.crowdin.com/for-volunteer-translators/) if you want to know more about how to use this tool.
 
-## Improving translations
-If your language is missing the translation for some strings, you can help out by adding a translation for that string. If you find a string you think could be improved, please feel free to do so. 
+## My language is missing in Mealie
+Once your language is translated on Crowdin, we need to manually add it in Mealie. If you believe your language is ready for use, please create an issue on GitHub.
 
-## Tooling
-Currently we use Vue-i18n for translations. Translations are stored in json format located in [frontend/src/locales](https://github.com/hay-kot/mealie/tree/master/frontend/src/locales).
-If you have experience with a good Translation Management System, please feel free to chime in on the [Discord](https://discord.gg/R6QDyJgbD2), as such a system could be helpful as the projects grow.
-Until then, [i18n Ally for VScode](https://marketplace.visualstudio.com/items?itemName=antfu.i18n-ally) is recommended to aid in translating. It also has a nice feature, which shows translations in-place when editing code.
-i18n Ally will also show which languages is missing translations.
+## I can't find a particular text in Crowdin
+There can be several reasons:
+- The text you're looking for is outdated: someone has already changed it or it will be removed/changed in the next release.
+- It is possible some texts are not translatable (yet) for technical reasons. If you spot one, please reach out to us on [Discord](https://discord.gg/QuStdQGSGK) or raise an issue on GitHub.

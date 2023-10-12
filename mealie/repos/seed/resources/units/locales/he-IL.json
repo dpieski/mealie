@@ -1,0 +1,102 @@
+{
+    "teaspoon": {
+        "name": "כפית",
+        "description": "",
+        "abbreviation": "כפיות"
+    },
+    "tablespoon": {
+        "name": "כף",
+        "description": "",
+        "abbreviation": "כפות"
+    },
+    "cup": {
+        "name": "כוס",
+        "description": "",
+        "abbreviation": "כוס"
+    },
+    "fluid-ounce": {
+        "name": "אונקיה",
+        "description": "",
+        "abbreviation": "אונקיות"
+    },
+    "pint": {
+        "name": "פיינט",
+        "description": "",
+        "abbreviation": "פיינטים"
+    },
+    "quart": {
+        "name": "קוארט",
+        "description": "",
+        "abbreviation": "קוארטים"
+    },
+    "gallon": {
+        "name": "גאלון",
+        "description": "",
+        "abbreviation": "גאלונים"
+    },
+    "milliliter": {
+        "name": "מיליליטר",
+        "description": "",
+        "abbreviation": "מ\"ל"
+    },
+    "liter": {
+        "name": "ליטר",
+        "description": "",
+        "abbreviation": "ליטרים"
+    },
+    "pound": {
+        "name": "פאונד",
+        "description": "",
+        "abbreviation": "פאונדים"
+    },
+    "ounce": {
+        "name": "אונקיה",
+        "description": "",
+        "abbreviation": "אונקיות"
+    },
+    "gram": {
+        "name": "גרם",
+        "description": "",
+        "abbreviation": "גרמים"
+    },
+    "kilogram": {
+        "name": "ק״ג",
+        "description": "",
+        "abbreviation": "ק״ג"
+    },
+    "milligram": {
+        "name": "מיליגרם",
+        "description": "",
+        "abbreviation": "מ״ג"
+    },
+    "splash": {
+        "name": "התזה",
+        "description": "",
+        "abbreviation": ""
+    },
+    "dash": {
+        "name": "קמצוץ",
+        "description": "",
+        "abbreviation": ""
+    },
+    "serving": {
+        "name": "מנה",
+        "description": "",
+        "abbreviation": ""
+    },
+    "head": {
+        "name": "ראש",
+        "description": "",
+        "abbreviation": ""
+    },
+    "clove": {
+        "name": "שן",
+        "description": "",
+        "abbreviation": ""
+    },
+    "can": {
+        "name": "פחית",
+        "description": "",
+        "abbreviation": ""
+    }
+}

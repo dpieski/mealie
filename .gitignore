@@ -1,28 +1,24 @@
 # Byte-compiled / optimized / DLL files
 .env
-__pycache__/
+*__pycache__/
 *.py[cod]
 *$py.class
+*.temp
+
 # frontend/.env.development
 docs/site/
-mealie/temp/*
-mealie/temp/api.html
-.temp/
+*temp/*
+.secret
+frontend/dist/
 
-
-mealie/data/backups/*
-mealie/data/debug/*
-mealie/data/img/*
-mealie/data/migration/*
-!mealie/dist/*
-
-#Exception to keep folders
-!mealie/dist/.gitkeep
-!mealie/data/backups/.gitkeep
-!mealie/data/backups/dev_sample_data*
-!mealie/data/debug/.gitkeep
-!mealie/data/migration/.gitkeep
-!mealie/data/img/.gitkeep
+dev/code-generation/generated/*
+dev/data/mealie.db-journal
+dev/data/backups/*
+dev/data/debug/*
+dev/data/img/*
+dev/data/migration/*
+dev/data/users/*
+dev/data/groups/*
 
 .DS_Store
 node_modules
@@ -60,9 +56,9 @@ develop-eggs/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
+!frontend/src/components/Recipe/Parts/
 sdist/
 var/
 wheels/
@@ -91,6 +87,8 @@ coverage.xml
 *.cover
 .hypothesis/
 .pytest_cache/
+.ruff_cache/
+test.db
 
 # Translations
 *.mo
@@ -146,10 +144,21 @@ ENV/
 # mypy
 .mypy_cache/
 
-# IDE settings
-# .vscode/
-
 # Node Modules
 node_modules/
-mealie/data/debug/last_recipe.json
+*.db
 *.sqlite
+scratch.py
+dev/data/backups/dev_sample_data*.zip
+!dev/data/backups/test*.zip
+dev/data/recipes/*
+dev/scripts/output/app_routes.py
+dev/scripts/output/javascriptAPI/*
+mealie/services/scraper/ingredient_nlp/model.crfmodel
+dev/code-generation/generated/openapi.json
+dev/code-generation/generated/test_routes.py
+mealie/services/parser_services/crfpp/model.crfmodel
+lcov.info
+dev/code-generation/openapi.json
+
+.run/

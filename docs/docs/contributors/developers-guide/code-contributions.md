@@ -1,25 +1,24 @@
 # Contributing to Mealie
 
-!!! Warning
-    It should be known going into this that this is my first open source project, and my first public github repo I'm actively managing. If something does not make sense, or is not best practice. PLEASE feel free to reach out and let me know. I'm all about improving workflow and making it easier for contributors. 
-
-[Please Join the Discord](https://discord.gg/R6QDyJgbD2). We are building a community of developers working on the project.
+[Please Join the Discord](https://discord.gg/QuStdQGSGK). We are building a community of developers working on the project.
 
 ## We Develop with Github
 We use github to host code, to track issues and feature requests, as well as accept pull requests.
 
 ## We Use [Github Flow](https://guides.github.com/introduction/flow/index.html), So All Code Changes Happen Through Pull Requests
-Pull requests are the best way to propose changes to the codebase (we use [Github Flow](https://guides.github.com/introduction/flow/index.html)). We actively welcome your pull requests: 
+Pull requests are the best way to propose changes to the codebase (we use [Github Flow](https://guides.github.com/introduction/flow/index.html)). We actively welcome your pull requests:
 
-1. Fork the repo and create your branch from `dev`.
-2. Read the page in in [dev/dev-notes.md](https://github.com/hay-kot/mealie/blob/0.1.0/dev/dev-notes.md) to get an idea on where the project is at.
-3. If you're interested on working on major changes please get in touch on discord and coordinate with other developers. No sense in doubling up on work if someones already on it. 
-4. If you've changed APIs, update the documentation.
-5. Issue that pull request!
-6. If you make changes to the dev branch reflect those changes in the dev/dev-notes.md to keep track of changes. Don't forget to add your name/handle/identifier! 
+1. Fork the repo and create your branch from `mealie-next`.
+2. Checkout the Discord, the PRs page, or the Projects page to get an idea of what's already being worked on.
+3. If you're interested on working on major changes please get in touch on discord and coordinate with other developers. No sense in doubling up on work if someones already on it.
+4. Once you've got an idea of what changes you want to make, create a draft PR as soon as you can to let us know what you're working on and how we can help!
+5. If you've changed APIs, update the documentation.
+6. Run tests, including `make backend-all`. Note that the tests do not clean up after themselves and leave things in the database. So be sure to also run `make clean-data` and/or `make backend-clean` inbetween major testing rounds to be sure that you aren't testing on old data.
+6. Issue that pull request! First make a draft PR, make sure that the automated github tests all pass, then mark as ready for review.
+7. Be sure to add release notes to the pull request.
 
-## Any contributions you make will be under the MIT Software License
-In short, when you submit code changes, your submissions are understood to be under the same [MIT License](http://choosealicense.com/licenses/mit/) that covers the project. Feel free to contact the maintainers if that's a concern.
+## Any contributions you make will be under the AGPL Software License
+In short, when you submit code changes, your submissions are understood to be under the same [AGPL License](https://choosealicense.com/licenses/agpl-3.0/) that covers the project. Feel free to contact the maintainers if that's a concern.
 
 ## Report bugs using Github's [issues](https://github.com/hay-kot/mealie/issues)
 We use GitHub issues to track public bugs. Report a bug by [opening a new issue](https://github.com/hay-kot/mealie/issues/new); it's that easy!
@@ -39,7 +38,7 @@ People *love* thorough bug reports. I'm not even kidding.
 
 
 ## License
-By contributing, you agree that your contributions will be licensed under its MIT License.
+By contributing, you agree that your contributions will be licensed under its AGPL License.
 
 ## References
 This document was adapted from the open-source contribution guidelines for [Facebook's Draft](https://github.com/facebook/draft-js/blob/a9316a723f9e918afde44dea68b5f9f39b7d9b00/CONTRIBUTING.md)
