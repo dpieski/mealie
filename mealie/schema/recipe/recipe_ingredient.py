@@ -2,18 +2,22 @@ from __future__ import annotations
 
 import datetime
 import enum
+from enum import StrEnum
 from fractions import Fraction
-from typing import ClassVar
+from typing import Any, ClassVar
 from uuid import UUID, uuid4
 
-from pydantic import UUID4, Field, validator
-from sqlalchemy.orm import joinedload
+from pydantic import UUID4, ConfigDict, Field, field_validator, model_validator
+from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.orm.interfaces import LoaderOption
 
-from mealie.db.models.recipe import IngredientFoodModel
+from mealie.db.models.recipe import IngredientFoodModel, IngredientFoodSubstitutionModel, IngredientUnitModel
+from mealie.lang.locale_config import LocalePluralFoodHandling
+from mealie.lang.providers import get_locale_context
 from mealie.schema._mealie import MealieModel
+from mealie.schema._mealie.mealie_model import UpdatedAtField
 from mealie.schema._mealie.types import NoneFloat
-from mealie.schema.getter_dict import ExtrasGetterDict
+from mealie.schema.recipe.recipe import Recipe
 from mealie.schema.response.pagination import PaginationBase
 
 INGREDIENT_QTY_PRECISION = 3
@@ -31,14 +35,182 @@ def display_fraction(fraction: Fraction):
     )
 
 
+class StandardizedUnitType(StrEnum):
+    """
+    An arbitrary list of standardized units supported by unit conversions.
+    The backend doesn't really care what standardized unit you use, as long as it's recognized,
+    but defining them here keeps it consistant with the frontend.
+    """
+
+    # Imperial
+    FLUID_OUNCE = "fluid_ounce"
+    CUP = "cup"
+
+    OUNCE = "ounce"
+    POUND = "pound"
+
+    # Metric
+    MILLILITER = "milliliter"
+    LITER = "liter"
+
+    GRAM = "gram"
+    KILOGRAM = "kilogram"
+
+
 class UnitFoodBase(MealieModel):
+    id: UUID4 | None = None
     name: str
+    plural_name: str | None = None
     description: str = ""
     extras: dict | None = {}
+
+    @field_validator("id", mode="before")
+    def convert_empty_id_to_none(cls, v):
+        # sometimes the frontend will give us an empty string instead of null, so we convert it to None,
+        # otherwise Pydantic will try to convert it to a UUID and fail
+        if not v:
+            v = None
+
+        return v
+
+    @field_validator("description", mode="before")
+    def convert_none_description_to_empty(cls, v):
+        return "" if v is None else v
+
+    @field_validator("extras", mode="before")
+    def convert_extras_to_dict(cls, v):
+        if isinstance(v, dict):
+            return v
+
+        return {x.key_name: x.value for x in v} if v else {}
+
+
+class CreateIngredientFoodAlias(MealieModel):
+    name: str
+
+
+class IngredientFoodAlias(CreateIngredientFoodAlias):
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IngredientFoodSummary(MealieModel):
+    """
+    A trimmed projection of a food, with nothing on it that can recurse.
+
+    Substitutions reference this rather than the full IngredientFood, which would make
+    Pydantic walk food -> substitutions -> food forever and generate an equally circular
+    TypeScript type.
+    """
+
+    id: UUID4
+    name: str
+    plural_name: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SubstitutionBase(MealieModel):
+    """
+    One "may be replaced by" substitution. The substitute food and the note are independently
+    optional, but at least one must be present, so a substitution may be another food
+    ("chicken broth"), free text ("water and a bouillon cube"), or a food with a caveat.
+    """
+
+    substitute_food_id: UUID4 | None = None
+    note: str | None = None
+
+    @field_validator("substitute_food_id", mode="before")
+    def convert_empty_id_to_none(cls, v):
+        # the frontend sometimes sends an empty string rather than null
+        return v or None
+
+    @field_validator("note", mode="before")
+    def convert_blank_note_to_none(cls, v):
+        return (v.strip() or None) if isinstance(v, str) else v
+
+    @model_validator(mode="after")
+    def validate_not_empty(self):
+        if not self.substitute_food_id and not self.note:
+            raise ValueError("a substitution must have a substitute food, a note, or both")
+
+        return self
+
+    @staticmethod
+    def prune(value: Any) -> Any:
+        """
+        Drops empty substitutions and de-dupes them by substitute food, keeping the first.
+
+        Parents call this before their substitutions validate, because an empty row is a UI
+        artifact rather than a client bug, and validate_not_empty rejects it outright.
+        """
+
+        if not isinstance(value, list):
+            return value
+
+        pruned = []
+        seen_food_ids: set[str] = set()
+        for substitution in value:
+            if isinstance(substitution, dict):
+                food_id = substitution.get("substituteFoodId", substitution.get("substitute_food_id"))
+                note = substitution.get("note")
+            else:
+                food_id = getattr(substitution, "substitute_food_id", None)
+                note = getattr(substitution, "note", None)
+
+            if isinstance(note, str):
+                note = note.strip()
+
+            if not food_id and not note:
+                continue
+
+            if food_id:
+                # note-only substitutions have no id to de-dupe on, and repeated notes are legitimate,
+                # so they must not be collapsed together here
+                food_id = str(food_id)
+                if food_id in seen_food_ids:
+                    continue
+
+                seen_food_ids.add(food_id)
+
+            pruned.append(substitution)
+
+        return pruned
+
+
+class CreateIngredientFoodSubstitution(SubstitutionBase): ...
+
+
+class IngredientFoodSubstitution(CreateIngredientFoodSubstitution):
+    substitute_food: IngredientFoodSummary | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CreateRecipeIngredientSubstitution(SubstitutionBase): ...
+
+
+class RecipeIngredientSubstitution(CreateRecipeIngredientSubstitution):
+    substitute_food: IngredientFoodSummary | None = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CreateIngredientFood(UnitFoodBase):
     label_id: UUID4 | None = None
+    aliases: list[CreateIngredientFoodAlias] = []
+    substitutions: list[CreateIngredientFoodSubstitution] = []
+    households_with_ingredient_food: list[str] = []
+
+    @field_validator("substitutions", mode="before")
+    def remove_empty_substitutions(cls, v):
+        return SubstitutionBase.prune(v)
+
+    @model_validator(mode="after")
+    def validate_no_self_substitution(self):
+        if self.id and any(sub.substitute_food_id == self.id for sub in self.substitutions):
+            raise ValueError("a food cannot be substituted with itself")
+
+        return self
 
 
 class SaveIngredientFood(CreateIngredientFood):
@@ -48,29 +220,73 @@ class SaveIngredientFood(CreateIngredientFood):
 class IngredientFood(CreateIngredientFood):
     id: UUID4
     label: MultiPurposeLabelSummary | None = None
-    created_at: datetime.datetime | None
-    update_at: datetime.datetime | None
+    aliases: list[IngredientFoodAlias] = []
+    recipe_count: int = 0
+    substitutions: list[IngredientFoodSubstitution] = []
 
-    _searchable_properties: ClassVar[list[str]] = ["name_normalized"]
+    created_at: datetime.datetime | None = None
+    updated_at: datetime.datetime | None = UpdatedAtField(None)
+
+    _searchable_properties: ClassVar[list[str]] = [
+        "name_normalized",
+        "plural_name_normalized",
+    ]
     _normalize_search: ClassVar[bool] = True
-
-    class Config:
-        orm_mode = True
-        getter_dict = ExtrasGetterDict
+    model_config = ConfigDict(from_attributes=True)
 
     @classmethod
     def loader_options(cls) -> list[LoaderOption]:
-        return [joinedload(IngredientFoodModel.extras), joinedload(IngredientFoodModel.label)]
+        return [
+            selectinload(IngredientFoodModel.households_with_ingredient_food),
+            selectinload(IngredientFoodModel.aliases),
+            joinedload(IngredientFoodModel.extras),
+            joinedload(IngredientFoodModel.label),
+            selectinload(IngredientFoodModel.substitutions).joinedload(IngredientFoodSubstitutionModel.substitute_food),
+        ]
+
+    @field_validator("households_with_ingredient_food", mode="before")
+    def convert_households_to_slugs(cls, v):
+        if not v:
+            return []
+
+        try:
+            return [household.slug for household in v]
+        except AttributeError:
+            return v
 
 
 class IngredientFoodPagination(PaginationBase):
     items: list[IngredientFood]
 
 
+class CreateIngredientUnitAlias(MealieModel):
+    name: str
+
+
+class IngredientUnitAlias(CreateIngredientUnitAlias):
+    model_config = ConfigDict(from_attributes=True)
+
+
 class CreateIngredientUnit(UnitFoodBase):
     fraction: bool = True
     abbreviation: str = ""
+    plural_abbreviation: str | None = ""
     use_abbreviation: bool = False
+
+    aliases: list[CreateIngredientUnitAlias] = []
+    standard_quantity: float | None = None
+    standard_unit: str | None = None
+
+    @model_validator(mode="after")
+    def validate_standardization_fields(self):
+        # If one is set, the other must be set.
+        # If quantity is <= 0, it's considered not set.
+        if not self.standard_unit:
+            self.standard_quantity = self.standard_unit = None
+        elif not ((self.standard_quantity or 0) > 0):
+            self.standard_quantity = self.standard_unit = None
+
+        return self
 
 
 class SaveIngredientUnit(CreateIngredientUnit):
@@ -79,24 +295,32 @@ class SaveIngredientUnit(CreateIngredientUnit):
 
 class IngredientUnit(CreateIngredientUnit):
     id: UUID4
-    created_at: datetime.datetime | None
-    update_at: datetime.datetime | None
+    aliases: list[IngredientUnitAlias] = []
 
-    _searchable_properties: ClassVar[list[str]] = ["name_normalized", "abbreviation_normalized"]
+    @classmethod
+    def loader_options(cls) -> list[LoaderOption]:
+        return [selectinload(IngredientUnitModel.aliases)]
+
+    created_at: datetime.datetime | None = None
+    updated_at: datetime.datetime | None = UpdatedAtField(None)
+
+    _searchable_properties: ClassVar[list[str]] = [
+        "name_normalized",
+        "plural_name_normalized",
+        "abbreviation_normalized",
+        "plural_abbreviation_normalized",
+    ]
     _normalize_search: ClassVar[bool] = True
-
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RecipeIngredientBase(MealieModel):
-    quantity: NoneFloat = 1
-    unit: IngredientUnit | CreateIngredientUnit | None
-    food: IngredientFood | CreateIngredientFood | None
-    note: str | None = ""
+    quantity: NoneFloat = 0
+    unit: IngredientUnit | CreateIngredientUnit | None = None
+    food: IngredientFood | CreateIngredientFood | None = None
+    referenced_recipe: Recipe | None = None
 
-    is_food: bool | None = None
-    disable_amount: bool | None = None
+    note: str | None = ""
     display: str = ""
     """
     How the ingredient should be displayed
@@ -104,31 +328,23 @@ class RecipeIngredientBase(MealieModel):
     Automatically calculated after the object is created, unless overwritten
     """
 
-    def __init__(self, **kwargs) -> None:
-        super().__init__(**kwargs)
-
-        # calculate missing is_food and disable_amount values
-        # we can't do this in a validator since they depend on each other
-        if self.is_food is None and self.disable_amount is not None:
-            self.is_food = not self.disable_amount
-        elif self.disable_amount is None and self.is_food is not None:
-            self.disable_amount = not self.is_food
-        elif self.is_food is None and self.disable_amount is None:
-            self.is_food = bool(self.food)
-            self.disable_amount = not self.is_food
-
-        # format the display property
+    @model_validator(mode="after")
+    def format_display(self):
         if not self.display:
             self.display = self._format_display()
 
-    @validator("unit", pre=True)
+        return self
+
+    @field_validator("unit", mode="before")
+    @classmethod
     def validate_unit(cls, v):
         if isinstance(v, str):
             return CreateIngredientUnit(name=v)
         else:
             return v
 
-    @validator("food", pre=True)
+    @field_validator("food", mode="before")
+    @classmethod
     def validate_food(cls, v):
         if isinstance(v, str):
             return CreateIngredientFood(name=v)
@@ -141,7 +357,7 @@ class RecipeIngredientBase(MealieModel):
         qty: float | Fraction
 
         # decimal
-        if not self.unit or not self.unit.fraction:
+        if self.unit and not self.unit.fraction:
             qty = round(self.quantity or 0, INGREDIENT_QTY_PRECISION)
             if qty.is_integer():
                 return str(int(qty))
@@ -165,33 +381,72 @@ class RecipeIngredientBase(MealieModel):
 
         return f"{whole_number} {display_fraction(qty)}"
 
+    def _format_unit_for_display(self) -> str:
+        if not self.unit:
+            return ""
+
+        use_plural = self.quantity and self.quantity > 1
+        unit_val = ""
+        if self.unit.use_abbreviation:
+            if use_plural:
+                unit_val = self.unit.plural_abbreviation or self.unit.abbreviation
+            else:
+                unit_val = self.unit.abbreviation
+
+        if not unit_val:
+            if use_plural:
+                unit_val = self.unit.plural_name or self.unit.name
+            else:
+                unit_val = self.unit.name
+
+        return unit_val
+
+    def _format_food_for_display(self, plural_handling: LocalePluralFoodHandling) -> str:
+        if not self.food:
+            return ""
+
+        if self.quantity and self.quantity <= 1:
+            use_plural = False
+        else:
+            match plural_handling:
+                case LocalePluralFoodHandling.NEVER:
+                    use_plural = False
+                case LocalePluralFoodHandling.WITHOUT_UNIT:
+                    # if quantity is zero then unit is not shown even if it's set
+                    use_plural = not (self.quantity and self.unit)
+                case LocalePluralFoodHandling.ALWAYS:
+                    use_plural = True
+                case _:
+                    use_plural = False
+
+        if use_plural:
+            return self.food.plural_name or self.food.name
+        else:
+            return self.food.name
+
     def _format_display(self) -> str:
-        components = []
+        locale_context = get_locale_context()
+        if locale_context:
+            _, locale_cfg = locale_context
+            plural_food_handling = locale_cfg.plural_food_handling
+        else:
+            plural_food_handling = LocalePluralFoodHandling.WITHOUT_UNIT
 
-        use_food = True
-        if self.is_food is False:
-            use_food = False
-        elif self.disable_amount is True:
-            use_food = False
+        components: list[str] = []
 
-        # ingredients with no food come across with a qty of 1, which looks weird
-        # e.g. "1 2 tbsp of olive oil"
-        if self.quantity and (use_food or self.quantity != 1):
+        if self.quantity:
             components.append(self._format_quantity_for_display())
 
-        if not use_food:
-            components.append(self.note or "")
-        else:
-            if self.quantity and self.unit:
-                components.append(self.unit.abbreviation if self.unit.use_abbreviation else self.unit.name)
+        if self.quantity and self.unit:
+            components.append(self._format_unit_for_display())
 
-            if self.food:
-                components.append(self.food.name)
+        if self.food:
+            components.append(self._format_food_for_display(plural_food_handling))
 
-            if self.note:
-                components.append(self.note)
+        if self.note:
+            components.append(self.note)
 
-        return " ".join(components)
+        return " ".join(components).strip()
 
 
 class IngredientUnitPagination(PaginationBase):
@@ -199,19 +454,31 @@ class IngredientUnitPagination(PaginationBase):
 
 
 class RecipeIngredient(RecipeIngredientBase):
-    title: str | None
-    original_text: str | None
-    disable_amount: bool = True
+    title: str | None = None
+    original_text: str | None = None
+
+    # kept off RecipeIngredientBase: its only other subclass is ShoppingListItemBase, which has
+    # nowhere to store these, so inheriting them would advertise a field that is always empty
+    substitutions: list[RecipeIngredientSubstitution] = []
 
     # Ref is used as a way to distinguish between an individual ingredient on the frontend
     # It is required for the reorder and section titles to function properly because of how
     # Vue handles reactivity. ref may serve another purpose in the future.
     reference_id: UUID = Field(default_factory=uuid4)
+    model_config = ConfigDict(from_attributes=True)
 
-    class Config:
-        orm_mode = True
+    @field_validator("substitutions", mode="before")
+    @classmethod
+    def remove_empty_substitutions(cls, v):
+        return SubstitutionBase.prune(v)
 
-    @validator("quantity", pre=True)
+    @field_validator("reference_id", mode="before")
+    @classmethod
+    def ensure_reference_id(cls, value) -> UUID:
+        return value or uuid4()
+
+    @field_validator("quantity", mode="before")
+    @classmethod
     def validate_quantity(cls, value) -> NoneFloat:
         """
         Sometimes the frontend UI will provide an empty string as a "null" value because of the default
@@ -233,7 +500,7 @@ class IngredientConfidence(MealieModel):
     quantity: NoneFloat = None
     food: NoneFloat = None
 
-    @validator("quantity", pre=True)
+    @field_validator("quantity", mode="before")
     @classmethod
     def validate_quantity(cls, value, values) -> NoneFloat:
         if isinstance(value, float):
@@ -244,14 +511,15 @@ class IngredientConfidence(MealieModel):
 
 
 class ParsedIngredient(MealieModel):
-    input: str | None
+    input: str | None = None
     confidence: IngredientConfidence = IngredientConfidence()
     ingredient: RecipeIngredient
 
 
-class RegisteredParser(str, enum.Enum):
+class RegisteredParser(enum.StrEnum):
     nlp = "nlp"
     brute = "brute"
+    openai = "openai"
 
 
 class IngredientsRequest(MealieModel):
@@ -276,4 +544,4 @@ class MergeUnit(MealieModel):
 
 from mealie.schema.labels.multi_purpose_label import MultiPurposeLabelSummary  # noqa: E402
 
-IngredientFood.update_forward_refs()
+IngredientFood.model_rebuild()

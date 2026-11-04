@@ -4,11 +4,11 @@ from pydantic.main import BaseModel
 class ImportBase(BaseModel):
     name: str
     status: bool
-    exception: str | None
+    exception: str | None = None
 
 
 class RecipeImport(ImportBase):
-    slug: str | None
+    slug: str | None = None
 
 
 class CommentImport(ImportBase):
@@ -24,12 +24,4 @@ class GroupImport(ImportBase):
 
 
 class UserImport(ImportBase):
-    pass
-
-
-class CustomPageImport(ImportBase):
-    pass
-
-
-class NotificationImport(ImportBase):
     pass

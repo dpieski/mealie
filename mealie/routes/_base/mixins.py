@@ -1,19 +1,39 @@
+import sqlite3
 from collections.abc import Callable
 from logging import Logger
-from typing import Generic, TypeVar
 
+import sqlalchemy.exc
 from fastapi import HTTPException, status
 from pydantic import UUID4, BaseModel
 
+from mealie.core.config import get_app_settings
 from mealie.repos.repository_generic import RepositoryGeneric
+from mealie.routes._base.permissions import not_found
 from mealie.schema.response import ErrorResponse
 
-C = TypeVar("C", bound=BaseModel)
-R = TypeVar("R", bound=BaseModel)
-U = TypeVar("U", bound=BaseModel)
+
+def is_postgres() -> bool:
+    return get_app_settings().DB_ENGINE == "postgres"
 
 
-class HttpRepo(Generic[C, R, U]):
+def is_unique_violation(ex: sqlalchemy.exc.IntegrityError) -> bool:
+
+    try:
+        import psycopg2  # noqa: I001
+
+        if is_postgres() and isinstance(ex.orig, psycopg2.Error):
+            return getattr(ex.orig, "pgcode", None) == "23505"
+
+    except ImportError:
+        pass
+
+    if isinstance(ex.orig, sqlite3.Error):
+        return getattr(ex.orig, "sqlite_errorcode", None) == sqlite3.SQLITE_CONSTRAINT_UNIQUE
+
+    return False
+
+
+class HttpRepo[C: BaseModel, R: BaseModel, U: BaseModel]:
     """
     The HttpRepo[C, R, U] class is a mixin class that provides a common set of methods for CRUD operations.
     This class is intended to be used in a composition pattern where a class has a mixin property. For example:
@@ -57,10 +77,23 @@ class HttpRepo(Generic[C, R, U]):
         # Respond
         msg = self.get_exception_message(ex)
 
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            detail=ErrorResponse.respond(message=msg, exception=str(ex)),
-        )
+        if isinstance(ex, sqlalchemy.exc.NoResultFound):
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                detail=ErrorResponse.respond(message=msg, exception=str(ex)),
+            )
+        elif isinstance(ex, sqlalchemy.exc.IntegrityError):
+            if is_unique_violation(ex):
+                msg = "This item already exists."
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail=ErrorResponse.respond(message=msg, exception=str(ex)),
+            )
+        else:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail=ErrorResponse.respond(message=msg, exception=str(ex)),
+            )
 
     def create_one(self, data: C) -> R | None:
         item: R | None = None
@@ -75,10 +108,7 @@ class HttpRepo(Generic[C, R, U]):
         item = self.repo.get_one(item_id, key)
 
         if not item:
-            raise HTTPException(
-                status.HTTP_404_NOT_FOUND,
-                detail=ErrorResponse.respond(message="Not found."),
-            )
+            raise not_found("Not found.")
 
         return item
 
@@ -86,10 +116,7 @@ class HttpRepo(Generic[C, R, U]):
         item = self.repo.get_one(item_id)
 
         if not item:
-            raise HTTPException(
-                status.HTTP_404_NOT_FOUND,
-                detail=ErrorResponse.respond(message="Not found."),
-            )
+            raise not_found("Not found.")
 
         try:
             item = self.repo.update(item_id, data)  # type: ignore
@@ -102,13 +129,10 @@ class HttpRepo(Generic[C, R, U]):
         item = self.repo.get_one(item_id)
 
         if not item:
-            raise HTTPException(
-                status.HTTP_404_NOT_FOUND,
-                detail=ErrorResponse.respond(message="Not found."),
-            )
+            raise not_found("Not found.")
 
         try:
-            item = self.repo.patch(item_id, data.dict(exclude_unset=True, exclude_defaults=True))
+            item = self.repo.patch(item_id, data.model_dump(exclude_unset=True, exclude_defaults=True))
         except Exception as ex:
             self.handle_exception(ex)
 

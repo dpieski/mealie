@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from jinja2 import Template
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from utils import PROJECT_DIR, CodeTemplates, HTTPRequest, RouteObject
 
 CWD = Path(__file__).parent
@@ -12,23 +12,32 @@ OUTFILE = PROJECT_DIR / "tests" / "utils" / "api_routes" / "__init__.py"
 
 
 class PathObject(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     route_object: RouteObject
     http_verbs: list[HTTPRequest]
 
-    class Config:
-        arbitrary_types_allowed = True
+
+def force_include_in_schema(app: FastAPI):
+    # clear schema cache
+    app.openapi_schema = None
+    for route in app.routes:
+        route.include_in_schema = True
 
 
 def get_path_objects(app: FastAPI):
+    force_include_in_schema(app)
     paths = []
-
     for key, value in app.openapi().items():
         if key == "paths":
-            for key, value in value.items():
+            for key, value2 in value.items():
+                verbs = []
+                for k, v in value2.items():
+                    verbs.append(HTTPRequest(request_type=k, **v))
+
                 paths.append(
                     PathObject(
                         route_object=RouteObject(key),
-                        http_verbs=[HTTPRequest(request_type=k, **v) for k, v in value.items()],
+                        http_verbs=verbs,
                     )
                 )
 

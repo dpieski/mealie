@@ -1,13 +1,10 @@
-# Start Backend API
 #!/bin/bash
-
-# Strict Mode
-# set -e
-# IFS=$'\n\t'
+# Start Backend API
 
 # Get PUID/PGID
 PUID=${PUID:-911}
 PGID=${PGID:-911}
+BASH_SOURCE=${BASH_SOURCE:-$0}
 
 add_user() {
     groupmod -o -g "$PGID" abc
@@ -15,18 +12,18 @@ add_user() {
 }
 
 change_user() {
-    # If container is started as root then create a new user and switch to it
-    if [ "$(id -u)" = "0" ]; then
+    if [ "$(id -u)" = $PUID ]; then
+        echo "
+        User uid:    $PUID
+        User gid:    $PGID
+        "
+    elif [ "$(id -u)" = "0" ]; then
+        # If container is started as root then create a new user and switch to it
         add_user
         chown -R $PUID:$PGID /app
 
         echo "Switching to dedicated user"
         exec gosu $PUID "$BASH_SOURCE" "$@"
-        elif [ "$(id -u)" = $PUID ]; then
-        echo "
-        User uid:    $PUID
-        User gid:    $PGID
-        "
     fi
 }
 
@@ -35,21 +32,64 @@ init() {
     cd /app
 
     # Activate our virtual environment here
-    . /opt/pysetup/.venv/bin/activate
-
-    # Initialize Database Prerun
-    poetry run python /app/mealie/db/init_db.py
+    . /opt/mealie/bin/activate
 }
 
-# change_user
-init
-GUNICORN_PORT=${API_PORT:-9000}
+load_secrets() {
+    # Each of these environment variables will support a `_FILE` suffix that allows
+    # for setting the environment variable through the Docker Compose secret
+    # pattern.
+    local -a secret_supported_vars=(
+        "POSTGRES_USER"
+        "POSTGRES_PASSWORD"
+        "POSTGRES_SERVER"
+        "POSTGRES_PORT"
+        "POSTGRES_DB"
+        "POSTGRES_URL_OVERRIDE"
 
-# Start API
-hostip=`/sbin/ip route|awk '/default/ { print $3 }'`
-if [ "$WEB_GUNICORN" = 'true' ]; then
-    echo "Starting Gunicorn"
-    gunicorn mealie.app:app -b 0.0.0.0:$GUNICORN_PORT --forwarded-allow-ips=$hostip -k uvicorn.workers.UvicornWorker -c /app/gunicorn_conf.py --preload
-else
-    uvicorn mealie.app:app --host 0.0.0.0 --forwarded-allow-ips=$hostip --port $GUNICORN_PORT
-fi
+        "SMTP_HOST"
+        "SMTP_PORT"
+        "SMTP_USER"
+        "SMTP_PASSWORD"
+
+        "LDAP_SERVER_URL"
+        "LDAP_QUERY_PASSWORD"
+
+        "OIDC_CONFIGURATION_URL"
+        "OIDC_CLIENT_ID"
+        "OIDC_NATIVE_CLIENT_ID"
+        "OIDC_CLIENT_SECRET"
+    )
+    local var file_var secret_file secret_value
+
+    # If any secrets are set, prefer them over base environment variables.
+    for var in "${secret_supported_vars[@]}"; do
+        file_var="${var}_FILE"
+        if [ -n "${!file_var}" ]; then
+            secret_file="${!file_var}"
+            if [ ! -f "$secret_file" ] || [ ! -r "$secret_file" ]; then
+                echo "ERROR: $file_var must point to a readable regular file." >&2
+                return 1
+            fi
+            # Check the read separately: export would mask a failed substitution.
+            if ! secret_value=$(cat -- "$secret_file" 2>/dev/null); then
+                echo "ERROR: Unable to read the secret configured by $file_var." >&2
+                return 1
+            fi
+            if [ -z "$secret_value" ]; then
+                echo "WARN: The secret configured by $file_var is empty; using an empty value." >&2
+            fi
+            export "$var=$secret_value"
+        fi
+    done
+}
+
+change_user
+init
+# load_secrets yields on error with `return` not `exit` and set -e isn't in effect here so
+#    we catch any non-zero exit codes from load_secrets and exit instead of letting startup
+#    continue after missing/unreadable secrets.
+load_secrets || exit 1
+
+# Preserve HOST_IP from the environment. AppSettings supplies the default when unset.
+exec mealie

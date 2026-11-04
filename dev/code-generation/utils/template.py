@@ -1,10 +1,7 @@
 import logging
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
-import black
-import isort
 from jinja2 import Template
 from rich.logging import RichHandler
 
@@ -23,10 +20,7 @@ def render_python_template(template_file: Path | str, dest: Path, data: dict):
 
     text = tplt.render(data=data)
 
-    text = black.format_str(text, mode=black.FileMode())
-
     dest.write_text(text)
-    isort.file(dest)
 
 
 @dataclass
@@ -34,10 +28,10 @@ class CodeSlicer:
     start: int
     end: int
 
-    indentation: str
+    indentation: str | None
     text: list[str]
 
-    _next_line = None
+    _next_line: int | None = None
 
     def purge_lines(self) -> None:
         start = self.start + 1
@@ -46,15 +40,24 @@ class CodeSlicer:
 
     def push_line(self, string: str) -> None:
         self._next_line = self._next_line or self.start + 1
-        self.text.insert(self._next_line, self.indentation + string + "\n")
+        self.text.insert(self._next_line, (self.indentation or "") + string + "\n")
         self._next_line += 1
 
 
-def get_indentation_of_string(line: str, comment_char: str = "//") -> str:
-    return re.sub(rf"{comment_char}.*", "", line).removesuffix("\n")
+def get_indentation_of_string(line: str) -> str:
+    # Extract everything before the comment
+    if "//" in line:
+        indentation = line.split("//")[0]
+    elif "#" in line:
+        indentation = line.split("#")[0]
+    else:
+        indentation = line
+
+    # Keep only the whitespace, remove any non-whitespace characters
+    return "".join(c for c in indentation if c.isspace())
 
 
-def find_start_end(file_text: list[str], gen_id: str) -> tuple[int, int, str]:
+def find_start_end(file_text: list[str], gen_id: str) -> tuple[int, int, str | None]:
     start = None
     end = None
     indentation = None

@@ -5,20 +5,26 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
 from mealie.core.config import get_app_dirs
+from mealie.core.root_logger import get_logger
 from mealie.core.security import create_file_token
 from mealie.pkgs.stats.fs_stats import pretty_size
 from mealie.routes._base import BaseAdminController, controller
+from mealie.routes._base.permissions import not_found
 from mealie.schema.admin.backup import AllBackups, BackupFile
 from mealie.schema.response.responses import ErrorResponse, FileTokenResponse, SuccessResponse
-from mealie.services.backups_v2.backup_v2 import BackupSchemaMismatch, BackupV2
 
+logger = get_logger()
 router = APIRouter(prefix="/backups")
 
 
 @controller(router)
 class AdminBackupController(BaseAdminController):
-    def _backup_path(self, name) -> Path:
-        return get_app_dirs().BACKUP_DIR / name
+    def _backup_path(self, name: str) -> Path:
+        backup_dir = get_app_dirs().BACKUP_DIR
+        candidate = (backup_dir / name).resolve()
+        if not candidate.is_relative_to(backup_dir.resolve()):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST)
+        return candidate
 
     @router.get("", response_model=AllBackups)
     def get_all(self):
@@ -37,11 +43,14 @@ class AdminBackupController(BaseAdminController):
 
     @router.post("", status_code=status.HTTP_201_CREATED, response_model=SuccessResponse)
     def create_one(self):
+        from mealie.services.backups_v2.backup_v2 import BackupV2
+
         backup = BackupV2()
 
         try:
             backup.backup()
         except Exception as e:
+            logger.exception(e)
             raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR) from e
 
         return SuccessResponse.respond("Backup created successfully")
@@ -52,7 +61,7 @@ class AdminBackupController(BaseAdminController):
         file = self._backup_path(file_name)
 
         if not file.exists():
-            raise HTTPException(status.HTTP_404_NOT_FOUND)
+            raise not_found()
 
         return FileTokenResponse.respond(create_file_token(file))
 
@@ -83,7 +92,7 @@ class AdminBackupController(BaseAdminController):
         app_dirs = get_app_dirs()
         dest = app_dirs.BACKUP_DIR.joinpath(f"{name}.zip")
 
-        if dest.absolute().parent != app_dirs.BACKUP_DIR:
+        if dest.resolve().parent != app_dirs.BACKUP_DIR.resolve():
             raise HTTPException(status.HTTP_400_BAD_REQUEST)
 
         with dest.open("wb") as buffer:
@@ -91,9 +100,12 @@ class AdminBackupController(BaseAdminController):
 
         if not dest.is_file():
             raise HTTPException(status.HTTP_400_BAD_REQUEST)
+        return SuccessResponse.respond("Upload successful")
 
     @router.post("/{file_name}/restore", response_model=SuccessResponse)
     def import_one(self, file_name: str):
+        from mealie.services.backups_v2.backup_v2 import BackupSchemaMismatch, BackupV2
+
         backup = BackupV2()
 
         file = self._backup_path(file_name)
@@ -106,6 +118,7 @@ class AdminBackupController(BaseAdminController):
                 ErrorResponse.respond("database backup schema version does not match current database"),
             ) from e
         except Exception as e:
+            logger.exception(e)
             raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR) from e
 
         return SuccessResponse.respond("Restore successful")

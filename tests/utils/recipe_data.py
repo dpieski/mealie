@@ -13,6 +13,10 @@ class RecipeSiteTestCase:
     num_steps: int
     html_file: Path
 
+    num_nutrition_entries: int = 0
+    include_tags: bool = False
+    expected_tags: set[str] | None = None
+
 
 def get_recipe_test_cases():
     return [
@@ -23,6 +27,7 @@ def get_recipe_test_cases():
             expected_slug="taiwanese-three-cup-chicken-san-bei-ji-recipe",
             num_ingredients=10,
             num_steps=3,
+            num_nutrition_entries=11,
         ),
         RecipeSiteTestCase(
             url="https://www.rezeptwelt.de/backen-herzhaft-rezepte/schinken-kaese-waffeln-ohne-viel-schnickschnack/4j0bkiig-94d4d-106529-cfcd2-is97x2ml",
@@ -30,7 +35,7 @@ def get_recipe_test_cases():
             html_file=test_data.html_schinken_kase_waffeln_ohne_viel_schnickschnack,
             expected_slug="schinken-kase-waffeln-ohne-viel-schnickschnack",
             num_ingredients=7,
-            num_steps=1,  # Malformed JSON Data, can't parse steps just get one string
+            num_steps=1,  # a single HowToSection wrapping one step, titled 'Waffelteig'
         ),
         RecipeSiteTestCase(
             url="https://cookpad.com/us/recipes/5544853-sous-vide-smoked-beef-ribs",
@@ -63,6 +68,21 @@ def get_recipe_test_cases():
             expected_slug="detroit-style-pepperoni-pizza",
             num_ingredients=8,
             num_steps=5,
+            include_tags=True,
+            expected_tags={
+                "Pizza",
+                "Basil",
+                "Dough",
+                "Dinner",
+                "Oregano",
+                "Mozzarella",
+                "Olive Oil",
+                "Pizza Dough",
+                "Basically",
+                "Flour",
+                "Web",
+                "Web Recipe",
+            },
         ),
     ]
 

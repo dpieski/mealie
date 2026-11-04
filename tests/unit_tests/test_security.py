@@ -1,20 +1,34 @@
+from datetime import timedelta
 from pathlib import Path
 
+import jwt
 import ldap
+import pytest
+from fastapi import HTTPException
 from pytest import MonkeyPatch
 
 from mealie.core import security
-from mealie.core.config import get_app_settings
+from mealie.core.config import get_app_dirs, get_app_settings
 from mealie.core.dependencies import validate_file_token
+from mealie.core.security.providers.credentials_provider import (
+    CredentialsProvider,
+    CredentialsRequest,
+)
+from mealie.core.security.providers.ldap_provider import LDAPProvider
 from mealie.db.db_setup import session_context
 from mealie.db.models.users.users import AuthMethod
+from mealie.repos.repository_factory import AllRepositories
+from mealie.routes.utility_routes import download_file
+from mealie.schema.user.auth import CredentialsRequestForm
 from mealie.schema.user.user import PrivateUser
 from tests.utils import random_string
 
 
 class LdapConnMock:
-    def __init__(self, user, password, admin, query_bind, query_password, mail, name) -> None:
+    def __init__(self, user, password, admin, query_bind, query_password, mail, name, users_can_search=True) -> None:
         self.app_settings = get_app_settings()
+        self.users_can_search = users_can_search
+        self.bound_dn = None
         self.user = user
         self.password = password
         self.query_bind = query_bind
@@ -24,9 +38,10 @@ class LdapConnMock:
         self.name = name
 
     def simple_bind_s(self, dn, bind_pw):
-        if dn == "cn={}, {}".format(self.user, self.app_settings.LDAP_BASE_DN):
+        self.bound_dn = dn
+        if dn == f"cn={self.user}, {self.app_settings.LDAP_BASE_DN}":
             valid_password = self.password
-        elif "cn={}, {}".format(self.query_bind, self.app_settings.LDAP_BASE_DN):
+        elif f"cn={self.query_bind}, {self.app_settings.LDAP_BASE_DN}":
             valid_password = self.query_password
 
         if bind_pw == valid_password:
@@ -36,10 +51,14 @@ class LdapConnMock:
 
     # Default search mock implementation
     def search_s(self, dn, scope, filter, attrlist):
+        if not self.users_can_search and self.bound_dn != self.query_bind:
+            # directories that only let the query account read entries
+            raise ldap.INSUFFICIENT_ACCESS
+
         if filter == self.app_settings.LDAP_ADMIN_FILTER:
             assert attrlist == []
             assert filter == self.app_settings.LDAP_ADMIN_FILTER
-            assert dn == "cn={}, {}".format(self.user, self.app_settings.LDAP_BASE_DN)
+            assert dn == f"cn={self.user}, {self.app_settings.LDAP_BASE_DN}"
             assert scope == ldap.SCOPE_BASE
 
             if not self.admin:
@@ -57,11 +76,9 @@ class LdapConnMock:
             mail_attribute=self.app_settings.LDAP_MAIL_ATTRIBUTE,
             input=self.user,
         )
-        search_filter = "(&(|({id_attribute}={input})({mail_attribute}={input})){filter})".format(
-            id_attribute=self.app_settings.LDAP_ID_ATTRIBUTE,
-            mail_attribute=self.app_settings.LDAP_MAIL_ATTRIBUTE,
-            input=self.user,
-            filter=user_filter,
+        search_filter = (
+            f"(&(|({self.app_settings.LDAP_ID_ATTRIBUTE}={self.user})"
+            f"({self.app_settings.LDAP_MAIL_ATTRIBUTE}={self.user})){user_filter})"
         )
         assert filter == search_filter
         assert dn == self.app_settings.LDAP_BASE_DN
@@ -69,7 +86,7 @@ class LdapConnMock:
 
         return [
             (
-                "cn={}, {}".format(self.user, self.app_settings.LDAP_BASE_DN),
+                f"cn={self.user}, {self.app_settings.LDAP_BASE_DN}",
                 {
                     self.app_settings.LDAP_ID_ATTRIBUTE: [self.user.encode()],
                     self.app_settings.LDAP_NAME_ATTRIBUTE: [self.name.encode()],
@@ -88,7 +105,7 @@ class LdapConnMock:
         pass
 
 
-def setup_env(monkeypatch: MonkeyPatch):
+def setup_env(monkeypatch: MonkeyPatch, **kwargs):
     user = random_string(10)
     mail = random_string(10)
     name = random_string(10)
@@ -101,9 +118,48 @@ def setup_env(monkeypatch: MonkeyPatch):
     monkeypatch.setenv("LDAP_BASE_DN", base_dn)
     monkeypatch.setenv("LDAP_QUERY_BIND", query_bind)
     monkeypatch.setenv("LDAP_QUERY_PASSWORD", query_password)
-    monkeypatch.setenv("LDAP_USER_FILTER", "(&(objectClass=user)(|({id_attribute}={input})({mail_attribute}={input})))")
+    monkeypatch.setenv(
+        "LDAP_USER_FILTER",
+        "(&(objectClass=user)(|({id_attribute}={input})({mail_attribute}={input})))",
+    )
 
     return user, mail, name, password, query_bind, query_password
+
+
+def decode_token(token: str) -> dict:
+    return jwt.decode(token, get_app_settings().SECRET, algorithms=[security.ALGORITHM])
+
+
+def test_create_access_token_defaults_to_token_time():
+    settings = get_app_settings()
+    token, duration = security.create_access_token({"sub": "abc"})
+
+    assert duration == timedelta(hours=settings.TOKEN_TIME)
+
+    payload = decode_token(token)
+    assert payload["sub"] == "abc"
+    # the returned duration is what clients schedule against, so it must match the token's own claims
+    assert payload["exp"] - payload["iat"] == duration.total_seconds()
+
+
+def test_create_access_token_honors_an_explicit_lifetime():
+    token, duration = security.create_access_token({"sub": "abc"}, timedelta(minutes=5))
+
+    assert duration == timedelta(minutes=5)
+
+    payload = decode_token(token)
+    assert payload["exp"] - payload["iat"] == 5 * 60
+
+
+def test_every_token_is_stamped_with_issuer_and_issued_at():
+    """One factory signs session, API and file tokens, so all three carry the same base claims."""
+    session_token, _ = security.create_access_token({"sub": "abc"})
+    file_token = security.create_file_token(Path(__file__))
+
+    for token in (session_token, file_token):
+        payload = decode_token(token)
+        assert payload["iss"] == security.ISS
+        assert payload["iat"]
 
 
 def test_create_file_token():
@@ -111,6 +167,65 @@ def test_create_file_token():
     file_token = security.create_file_token(file_path)
 
     assert file_path == validate_file_token(file_token)
+
+
+def test_validate_file_token_rejects_a_token_without_a_file_claim():
+    """Session and API tokens share the signing secret, so they decode here — the claim is the check.
+
+    Previously these raised TypeError on `Path(None)`, surfacing as a 500 instead of the documented
+    401.
+    """
+    session_token, _ = security.create_access_token({"sub": "abc"})
+
+    with pytest.raises(HTTPException) as exc_info:
+        validate_file_token(session_token)
+
+    assert exc_info.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_download_file_security_restrictions():
+    dirs = get_app_dirs()
+
+    # Test 1: File in DATA_DIR but outside allowed dirs should be blocked
+    secret_file = dirs.DATA_DIR / ".secret"
+
+    with pytest.raises(HTTPException) as exc_info:
+        await download_file(secret_file)
+    assert exc_info.value.status_code == 400
+
+    # Test 2: File in BACKUP_DIR should be allowed (but only if it exists)
+    backup_file = dirs.BACKUP_DIR / "test.zip"
+    dirs.BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    backup_file.write_text("test backup content")
+
+    try:
+        response = await download_file(backup_file)
+        assert response.media_type == "application/octet-stream"
+        assert response.path == backup_file
+    finally:
+        backup_file.unlink(missing_ok=True)
+
+    # Test 3: File in GROUPS_DIR should be allowed (but only if it exists)
+    export_dir = dirs.GROUPS_DIR / "some-group-id" / "export"
+    export_dir.mkdir(parents=True, exist_ok=True)
+    export_file = export_dir / "test.zip"
+    export_file.write_text("test export content")
+
+    try:
+        response = await download_file(export_file)
+        assert response.media_type == "application/octet-stream"
+        assert response.path == export_file
+    finally:
+        export_file.unlink(missing_ok=True)
+        # Clean up the directory structure
+        export_dir.rmdir()
+        (dirs.GROUPS_DIR / "some-group-id").rmdir()
+
+
+def get_provider(session, username: str, password: str):
+    request_data = CredentialsRequest(username=username, password=password)
+    return LDAPProvider(session, request_data)
 
 
 def test_ldap_user_creation(monkeypatch: MonkeyPatch):
@@ -125,13 +240,58 @@ def test_ldap_user_creation(monkeypatch: MonkeyPatch):
     get_app_settings.cache_clear()
 
     with session_context() as session:
-        result = security.authenticate_user(session, user, password)
+        provider = get_provider(session, user, password)
+        result = provider.get_user()
+
+    app_settings = get_app_settings()
 
     assert result
     assert result.username == user
     assert result.email == mail
     assert result.full_name == name
     assert result.admin is False
+    assert result.group == app_settings.DEFAULT_GROUP
+    assert result.household == app_settings.DEFAULT_HOUSEHOLD
+    assert result.auth_method == AuthMethod.LDAP
+
+
+@pytest.mark.parametrize("valid_group", [True, False])
+@pytest.mark.parametrize("valid_household", [True, False])
+def test_ldap_user_creation_invalid_group_or_household(
+    unfiltered_database: AllRepositories, monkeypatch: MonkeyPatch, valid_group: bool, valid_household: bool
+):
+    user, mail, name, password, query_bind, query_password = setup_env(monkeypatch)
+    if not valid_group:
+        monkeypatch.setenv("DEFAULT_GROUP", random_string())
+    if not valid_household:
+        monkeypatch.setenv("DEFAULT_HOUSEHOLD", random_string())
+
+    def ldap_initialize_mock(url):
+        assert url == ""
+        return LdapConnMock(user, password, False, query_bind, query_password, mail, name)
+
+    monkeypatch.setattr(ldap, "initialize", ldap_initialize_mock)
+
+    get_app_settings.cache_clear()
+
+    with session_context() as session:
+        provider = get_provider(session, user, password)
+        try:
+            result = provider.get_user()
+        except ValueError:
+            result = None
+
+    if valid_group and valid_household:
+        assert result
+    else:
+        assert not result
+
+    # check if the user exists in the db
+    user = unfiltered_database.users.get_by_username(user)
+    if valid_group and valid_household:
+        assert user
+    else:
+        assert not user
 
 
 def test_ldap_user_creation_fail(monkeypatch: MonkeyPatch):
@@ -146,9 +306,10 @@ def test_ldap_user_creation_fail(monkeypatch: MonkeyPatch):
     get_app_settings.cache_clear()
 
     with session_context() as session:
-        result = security.authenticate_user(session, user, password + "a")
+        provider = get_provider(session, user, password + "a")
+        result = provider.get_user()
 
-    assert result is False
+    assert result is None
 
 
 def test_ldap_user_creation_non_admin(monkeypatch: MonkeyPatch):
@@ -164,7 +325,8 @@ def test_ldap_user_creation_non_admin(monkeypatch: MonkeyPatch):
     get_app_settings.cache_clear()
 
     with session_context() as session:
-        result = security.authenticate_user(session, user, password)
+        provider = get_provider(session, user, password)
+        result = provider.get_user()
 
     assert result
     assert result.username == user
@@ -186,7 +348,8 @@ def test_ldap_user_creation_admin(monkeypatch: MonkeyPatch):
     get_app_settings.cache_clear()
 
     with session_context() as session:
-        result = security.authenticate_user(session, user, password)
+        provider = get_provider(session, user, password)
+        result = provider.get_user()
 
     assert result
     assert result.username == user
@@ -195,38 +358,35 @@ def test_ldap_user_creation_admin(monkeypatch: MonkeyPatch):
     assert result.admin
 
 
-def test_ldap_disabled(monkeypatch: MonkeyPatch):
-    monkeypatch.setenv("LDAP_AUTH_ENABLED", "False")
-
-    user = random_string(10)
-    password = random_string(10)
-
-    class LdapConnMock:
-        def simple_bind_s(self, dn, bind_pw):
-            assert False  # When LDAP is disabled, this method should not be called
-
-        def search_s(self, dn, scope, filter, attrlist):
-            pass
-
-        def set_option(self, option, invalue):
-            pass
-
-        def unbind_s(self):
-            pass
-
-        def start_tls_s(self):
-            pass
+def test_ldap_admin_filter_searches_as_query_account(monkeypatch: MonkeyPatch):
+    user, mail, name, password, query_bind, query_password = setup_env(monkeypatch)
+    monkeypatch.setenv("LDAP_ADMIN_FILTER", "(memberOf=cn=admins,dc=example,dc=com)")
 
     def ldap_initialize_mock(url):
-        assert url == ""
-        return LdapConnMock()
+        return LdapConnMock(user, password, True, query_bind, query_password, mail, name, users_can_search=False)
 
     monkeypatch.setattr(ldap, "initialize", ldap_initialize_mock)
 
     get_app_settings.cache_clear()
 
     with session_context() as session:
-        security.authenticate_user(session, user, password)
+        provider = get_provider(session, user, password)
+        result = provider.get_user()
+
+    assert result
+    assert result.admin
+
+
+def test_ldap_disabled(monkeypatch: MonkeyPatch):
+    monkeypatch.setenv("LDAP_AUTH_ENABLED", "False")
+
+    get_app_settings.cache_clear()
+
+    with session_context() as session:
+        form = CredentialsRequestForm("username", "password", False)
+        provider = security.get_auth_provider(session, form)
+
+    assert isinstance(provider, CredentialsProvider)
 
 
 def test_user_login_ldap_auth_method(monkeypatch: MonkeyPatch, ldap_user: PrivateUser):
@@ -238,14 +398,23 @@ def test_user_login_ldap_auth_method(monkeypatch: MonkeyPatch, ldap_user: Privat
 
     def ldap_initialize_mock(url):
         assert url == ""
-        return LdapConnMock(ldap_user.username, ldap_password, False, query_bind, query_password, ldap_user.email, name)
+        return LdapConnMock(
+            ldap_user.username,
+            ldap_password,
+            False,
+            query_bind,
+            query_password,
+            ldap_user.email,
+            name,
+        )
 
     monkeypatch.setattr(ldap, "initialize", ldap_initialize_mock)
 
     get_app_settings.cache_clear()
 
     with session_context() as session:
-        result = security.authenticate_user(session, ldap_user.username, ldap_password)
+        provider = get_provider(session, ldap_user.username, ldap_password)
+        result = provider.get_user()
 
     assert result
     assert result.username == ldap_user.username
@@ -253,3 +422,66 @@ def test_user_login_ldap_auth_method(monkeypatch: MonkeyPatch, ldap_user: Privat
     assert result.full_name == ldap_user.full_name
     assert result.admin == ldap_user.admin
     assert result.auth_method == AuthMethod.LDAP
+
+
+class PermissiveBindConnMock(LdapConnMock):
+    """Simulates a directory that accepts a bind with a valid DN and an empty
+    password (anonymous/unauthenticated bind) as success."""
+
+    def simple_bind_s(self, dn, bind_pw):
+        if bind_pw == "":
+            return
+        return super().simple_bind_s(dn, bind_pw)
+
+
+class CapturingConnMock(LdapConnMock):
+    """Records the search filter passed to search_s and returns no matches."""
+
+    captured_filter: str | None = None
+
+    def search_s(self, dn, scope, filter, attrlist):
+        if filter != self.app_settings.LDAP_ADMIN_FILTER:
+            CapturingConnMock.captured_filter = filter
+        return []
+
+
+def test_ldap_rejects_empty_password(monkeypatch: MonkeyPatch):
+    user, mail, name, _, query_bind, query_password = setup_env(monkeypatch)
+
+    def ldap_initialize_mock(url):
+        # Even against a directory that would accept the empty-password bind,
+        # the provider must refuse before binding.
+        return PermissiveBindConnMock(user, "", False, query_bind, query_password, mail, name)
+
+    monkeypatch.setattr(ldap, "initialize", ldap_initialize_mock)
+
+    get_app_settings.cache_clear()
+
+    with session_context() as session:
+        provider = get_provider(session, user, "")
+        result = provider.get_user()
+
+    assert result is None
+
+
+def test_ldap_escapes_username_in_search_filter(monkeypatch: MonkeyPatch):
+    _, mail, name, password, query_bind, query_password = setup_env(monkeypatch)
+    injected_username = "a*)(uid=*"
+    CapturingConnMock.captured_filter = None
+
+    def ldap_initialize_mock(url):
+        return CapturingConnMock(injected_username, password, False, query_bind, query_password, mail, name)
+
+    monkeypatch.setattr(ldap, "initialize", ldap_initialize_mock)
+
+    get_app_settings.cache_clear()
+
+    with session_context() as session:
+        provider = get_provider(session, injected_username, password)
+        provider.get_user()
+
+    captured = CapturingConnMock.captured_filter
+    assert captured is not None
+    # Metacharacters from the username must be escaped, never present as raw syntax.
+    assert "\\2a" in captured  # '*' -> \2a
+    assert "*" not in captured

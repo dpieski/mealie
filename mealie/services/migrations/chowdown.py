@@ -1,10 +1,9 @@
 import tempfile
-import zipfile
 from pathlib import Path
 
 from ._migration_base import BaseMigrator
 from .utils.migration_alias import MigrationAlias
-from .utils.migration_helpers import MigrationReaders, import_image, split_by_comma
+from .utils.migration_helpers import MigrationReaders, extract_zip, safe_local_path, split_by_comma
 
 
 class ChowdownMigrator(BaseMigrator):
@@ -20,12 +19,23 @@ class ChowdownMigrator(BaseMigrator):
             MigrationAlias(key="tags", alias="tags", func=split_by_comma),
         ]
 
+    @classmethod
+    def get_zip_base_path(cls, path: Path) -> Path:
+        potential_path = super().get_zip_base_path(path)
+        if path == potential_path:
+            return path
+
+        # make sure we didn't accidentally open a recipe dir
+        if (potential_path / "recipe.json").exists():
+            return path
+        else:
+            return potential_path
+
     def _migrate(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            with zipfile.ZipFile(self.archive) as zip_file:
-                zip_file.extractall(tmpdir)
+            extract_zip(self.archive, tmpdir)
 
-            temp_path = Path(tmpdir)
+            temp_path = self.get_zip_base_path(Path(tmpdir))
 
             chow_dir = next(temp_path.iterdir())
             image_dir = temp_path.joinpath(chow_dir, "images")
@@ -48,8 +58,10 @@ class ChowdownMigrator(BaseMigrator):
                             continue
 
                         if r.image:
-                            cd_image = image_dir.joinpath(r.image)
+                            cd_image = safe_local_path(image_dir.joinpath(r.image), image_dir)
+                        else:
+                            cd_image = None
                     except StopIteration:
                         continue
                     if cd_image:
-                        import_image(cd_image, recipe_id)
+                        self.import_image(slug, cd_image, recipe_id, extraction_root=image_dir)

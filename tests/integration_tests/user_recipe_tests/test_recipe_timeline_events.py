@@ -1,18 +1,24 @@
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 
+from mealie.lang.providers import get_all_translations
 from mealie.schema.recipe.recipe import Recipe
 from mealie.schema.recipe.recipe_timeline_events import (
     RecipeTimelineEventOut,
     RecipeTimelineEventPagination,
     TimelineEventImage,
+    TimelineEventType,
 )
 from mealie.schema.recipe.request_helpers import UpdateImageResponse
+from mealie.services.recipe.recipe_service import RECIPE_CREATED_EVENT_SUBJECT
 from tests.utils import api_routes
 from tests.utils.factories import random_string
 from tests.utils.fixture_schemas import TestUser
+
+PERSISTED_TRANSLATION_KEYS = [RECIPE_CREATED_EVENT_SUBJECT]
 
 
 @pytest.fixture(scope="function")
@@ -28,18 +34,26 @@ def recipes(api_client: TestClient, unique_user: TestUser):
         response = api_client.get(f"{api_routes.recipes}/{slug}", headers=unique_user.token)
         assert response.status_code == 200
 
-        recipe = Recipe.parse_obj(response.json())
+        recipe = Recipe.model_validate(response.json())
         recipes.append(recipe)
 
     yield recipes
     response = api_client.delete(f"{api_routes.recipes}/{slug}", headers=unique_user.token)
 
 
-def test_create_timeline_event(api_client: TestClient, unique_user: TestUser, recipes: list[Recipe]):
+@pytest.mark.parametrize("use_other_household_user", [True, False])
+def test_create_timeline_event(
+    api_client: TestClient,
+    unique_user: TestUser,
+    recipes: list[Recipe],
+    h2_user: TestUser,
+    use_other_household_user: bool,
+):
+    user = h2_user if use_other_household_user else unique_user
     recipe = recipes[0]
     new_event = {
         "recipe_id": str(recipe.id),
-        "user_id": unique_user.user_id,
+        "user_id": str(user.user_id),
         "subject": random_string(),
         "event_type": "info",
         "message": random_string(),
@@ -48,42 +62,83 @@ def test_create_timeline_event(api_client: TestClient, unique_user: TestUser, re
     event_response = api_client.post(
         api_routes.recipes_timeline_events,
         json=new_event,
-        headers=unique_user.token,
+        headers=user.token,
     )
     assert event_response.status_code == 201
 
-    event = RecipeTimelineEventOut.parse_obj(event_response.json())
+    event = RecipeTimelineEventOut.model_validate(event_response.json())
     assert event.recipe_id == recipe.id
-    assert str(event.user_id) == str(unique_user.user_id)
+    assert str(event.user_id) == str(user.user_id)
 
 
-def test_get_all_timeline_events(api_client: TestClient, unique_user: TestUser, recipes: list[Recipe]):
+def test_create_timeline_event_defaults_timestamp_to_request_time(
+    api_client: TestClient,
+    unique_user: TestUser,
+    recipes: list[Recipe],
+):
+    recipe = recipes[0]
+    new_event = {
+        "recipe_id": str(recipe.id),
+        "user_id": str(unique_user.user_id),
+        "subject": random_string(),
+        "event_type": "info",
+    }
+
+    before = datetime.now(UTC) - timedelta(seconds=5)
+    event_response = api_client.post(
+        api_routes.recipes_timeline_events,
+        json=new_event,
+        headers=unique_user.token,
+    )
+    after = datetime.now(UTC) + timedelta(seconds=5)
+    assert event_response.status_code == 201
+
+    event = RecipeTimelineEventOut.model_validate(event_response.json())
+    timestamp = event.timestamp
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=UTC)
+    assert before <= timestamp <= after
+
+
+@pytest.mark.parametrize("use_other_household_user", [True, False])
+def test_get_all_timeline_events(
+    api_client: TestClient,
+    unique_user: TestUser,
+    recipes: list[Recipe],
+    h2_user: TestUser,
+    use_other_household_user: bool,
+):
+    user = h2_user if use_other_household_user else unique_user
     # create some events
     recipe = recipes[0]
-    events_data = [
-        {
-            "recipe_id": str(recipe.id),
-            "user_id": unique_user.user_id,
-            "subject": random_string(),
-            "event_type": "info",
-            "message": random_string(),
-        }
-        for _ in range(10)
-    ]
+    events_data: list[dict] = []
+    for user in [unique_user, h2_user]:
+        events_data.extend(
+            [
+                {
+                    "recipe_id": str(recipe.id),
+                    "user_id": str(user.user_id),
+                    "subject": random_string(),
+                    "event_type": "info",
+                    "message": random_string(),
+                }
+                for _ in range(10)
+            ]
+        )
 
     events: list[RecipeTimelineEventOut] = []
     for event_data in events_data:
         params: dict = {"queryFilter": f"recipe_id={event_data['recipe_id']}"}
         event_response = api_client.post(
-            api_routes.recipes_timeline_events, params=params, json=event_data, headers=unique_user.token
+            api_routes.recipes_timeline_events, params=params, json=event_data, headers=user.token
         )
-        events.append(RecipeTimelineEventOut.parse_obj(event_response.json()))
+        events.append(RecipeTimelineEventOut.model_validate(event_response.json()))
 
     # check that we see them all
     params = {"page": 1, "perPage": -1}
 
-    events_response = api_client.get(api_routes.recipes_timeline_events, params=params, headers=unique_user.token)
-    events_pagination = RecipeTimelineEventPagination.parse_obj(events_response.json())
+    events_response = api_client.get(api_routes.recipes_timeline_events, params=params, headers=user.token)
+    events_pagination = RecipeTimelineEventPagination.model_validate(events_response.json())
 
     event_ids = [event.id for event in events]
     paginated_event_ids = [event.id for event in events_pagination.items]
@@ -93,12 +148,20 @@ def test_get_all_timeline_events(api_client: TestClient, unique_user: TestUser, 
         assert event_id in paginated_event_ids
 
 
-def test_get_timeline_event(api_client: TestClient, unique_user: TestUser, recipes: list[Recipe]):
+@pytest.mark.parametrize("use_other_household_user", [True, False])
+def test_get_timeline_event(
+    api_client: TestClient,
+    unique_user: TestUser,
+    recipes: list[Recipe],
+    h2_user: TestUser,
+    use_other_household_user: bool,
+):
+    user = h2_user if use_other_household_user else unique_user
     # create an event
     recipe = recipes[0]
     new_event_data = {
         "recipe_id": str(recipe.id),
-        "user_id": unique_user.user_id,
+        "user_id": str(user.user_id),
         "subject": random_string(),
         "event_type": "info",
         "message": random_string(),
@@ -107,19 +170,27 @@ def test_get_timeline_event(api_client: TestClient, unique_user: TestUser, recip
     event_response = api_client.post(
         api_routes.recipes_timeline_events,
         json=new_event_data,
-        headers=unique_user.token,
+        headers=user.token,
     )
-    new_event = RecipeTimelineEventOut.parse_obj(event_response.json())
+    new_event = RecipeTimelineEventOut.model_validate(event_response.json())
 
     # fetch the new event
-    event_response = api_client.get(api_routes.recipes_timeline_events_item_id(new_event.id), headers=unique_user.token)
+    event_response = api_client.get(api_routes.recipes_timeline_events_item_id(new_event.id), headers=user.token)
     assert event_response.status_code == 200
 
-    event = RecipeTimelineEventOut.parse_obj(event_response.json())
+    event = RecipeTimelineEventOut.model_validate(event_response.json())
     assert event == new_event
 
 
-def test_update_timeline_event(api_client: TestClient, unique_user: TestUser, recipes: list[Recipe]):
+@pytest.mark.parametrize("use_other_household_user", [True, False])
+def test_update_timeline_event(
+    api_client: TestClient,
+    unique_user: TestUser,
+    recipes: list[Recipe],
+    h2_user: TestUser,
+    use_other_household_user: bool,
+):
+    user = h2_user if use_other_household_user else unique_user
     old_subject = random_string()
     new_subject = random_string()
 
@@ -127,13 +198,13 @@ def test_update_timeline_event(api_client: TestClient, unique_user: TestUser, re
     recipe = recipes[0]
     new_event_data = {
         "recipe_id": str(recipe.id),
-        "user_id": unique_user.user_id,
+        "user_id": str(user.user_id),
         "subject": old_subject,
         "event_type": "info",
     }
 
-    event_response = api_client.post(api_routes.recipes_timeline_events, json=new_event_data, headers=unique_user.token)
-    new_event = RecipeTimelineEventOut.parse_obj(event_response.json())
+    event_response = api_client.post(api_routes.recipes_timeline_events, json=new_event_data, headers=user.token)
+    new_event = RecipeTimelineEventOut.model_validate(event_response.json())
     assert new_event.subject == old_subject
 
     # update the event
@@ -142,52 +213,64 @@ def test_update_timeline_event(api_client: TestClient, unique_user: TestUser, re
     event_response = api_client.put(
         api_routes.recipes_timeline_events_item_id(new_event.id),
         json=updated_event_data,
-        headers=unique_user.token,
+        headers=user.token,
     )
     assert event_response.status_code == 200
 
-    updated_event = RecipeTimelineEventOut.parse_obj(event_response.json())
+    updated_event = RecipeTimelineEventOut.model_validate(event_response.json())
     assert updated_event.id == new_event.id
     assert updated_event.subject == new_subject
     assert updated_event.timestamp == new_event.timestamp
 
 
-def test_delete_timeline_event(api_client: TestClient, unique_user: TestUser, recipes: list[Recipe]):
+@pytest.mark.parametrize("use_other_household_user", [True, False])
+def test_delete_timeline_event(
+    api_client: TestClient,
+    unique_user: TestUser,
+    recipes: list[Recipe],
+    h2_user: TestUser,
+    use_other_household_user: bool,
+):
+    user = h2_user if use_other_household_user else unique_user
     # create an event
     recipe = recipes[0]
     new_event_data = {
         "recipe_id": str(recipe.id),
-        "user_id": unique_user.user_id,
+        "user_id": str(user.user_id),
         "subject": random_string(),
         "event_type": "info",
         "message": random_string(),
     }
 
-    event_response = api_client.post(api_routes.recipes_timeline_events, json=new_event_data, headers=unique_user.token)
-    new_event = RecipeTimelineEventOut.parse_obj(event_response.json())
+    event_response = api_client.post(api_routes.recipes_timeline_events, json=new_event_data, headers=user.token)
+    new_event = RecipeTimelineEventOut.model_validate(event_response.json())
 
     # delete the event
-    event_response = api_client.delete(
-        api_routes.recipes_timeline_events_item_id(new_event.id), headers=unique_user.token
-    )
+    event_response = api_client.delete(api_routes.recipes_timeline_events_item_id(new_event.id), headers=user.token)
     assert event_response.status_code == 200
 
-    deleted_event = RecipeTimelineEventOut.parse_obj(event_response.json())
+    deleted_event = RecipeTimelineEventOut.model_validate(event_response.json())
     assert deleted_event.id == new_event.id
 
     # try to get the event
-    event_response = api_client.get(
-        api_routes.recipes_timeline_events_item_id(deleted_event.id), headers=unique_user.token
-    )
+    event_response = api_client.get(api_routes.recipes_timeline_events_item_id(deleted_event.id), headers=user.token)
     assert event_response.status_code == 404
 
 
-def test_timeline_event_message_alias(api_client: TestClient, unique_user: TestUser, recipes: list[Recipe]):
+@pytest.mark.parametrize("use_other_household_user", [True, False])
+def test_timeline_event_message_alias(
+    api_client: TestClient,
+    unique_user: TestUser,
+    recipes: list[Recipe],
+    h2_user: TestUser,
+    use_other_household_user: bool,
+):
+    user = h2_user if use_other_household_user else unique_user
     # create an event using aliases
     recipe = recipes[0]
     new_event_data = {
         "recipeId": str(recipe.id),
-        "userId": unique_user.user_id,
+        "userId": str(user.user_id),
         "subject": random_string(),
         "eventType": "info",
         "eventMessage": random_string(),  # eventMessage is the correct alias for the message
@@ -196,18 +279,18 @@ def test_timeline_event_message_alias(api_client: TestClient, unique_user: TestU
     event_response = api_client.post(
         api_routes.recipes_timeline_events,
         json=new_event_data,
-        headers=unique_user.token,
+        headers=user.token,
     )
-    new_event = RecipeTimelineEventOut.parse_obj(event_response.json())
+    new_event = RecipeTimelineEventOut.model_validate(event_response.json())
     assert str(new_event.user_id) == new_event_data["userId"]
     assert str(new_event.event_type) == new_event_data["eventType"]
     assert new_event.message == new_event_data["eventMessage"]
 
     # fetch the new event
-    event_response = api_client.get(api_routes.recipes_timeline_events_item_id(new_event.id), headers=unique_user.token)
+    event_response = api_client.get(api_routes.recipes_timeline_events_item_id(new_event.id), headers=user.token)
     assert event_response.status_code == 200
 
-    event = RecipeTimelineEventOut.parse_obj(event_response.json())
+    event = RecipeTimelineEventOut.model_validate(event_response.json())
     assert event == new_event
 
     # update the event message
@@ -218,31 +301,78 @@ def test_timeline_event_message_alias(api_client: TestClient, unique_user: TestU
     event_response = api_client.put(
         api_routes.recipes_timeline_events_item_id(new_event.id),
         json=updated_event_data,
-        headers=unique_user.token,
+        headers=user.token,
     )
     assert event_response.status_code == 200
 
-    updated_event = RecipeTimelineEventOut.parse_obj(event_response.json())
+    updated_event = RecipeTimelineEventOut.model_validate(event_response.json())
     assert updated_event.subject == new_subject
     assert updated_event.message == new_message
 
 
+@pytest.mark.parametrize("use_other_household_user", [True, False])
 def test_timeline_event_update_image(
-    api_client: TestClient, unique_user: TestUser, recipes: list[Recipe], test_image_jpg: str
+    api_client: TestClient,
+    unique_user: TestUser,
+    recipes: list[Recipe],
+    test_image_jpg: str,
+    h2_user: TestUser,
+    use_other_household_user: bool,
 ):
+    user = h2_user if use_other_household_user else unique_user
     # create an event
     recipe = recipes[0]
     new_event_data = {
         "recipe_id": str(recipe.id),
-        "user_id": unique_user.user_id,
+        "user_id": str(user.user_id),
         "subject": random_string(),
         "message": random_string(),
         "event_type": "info",
     }
 
-    event_response = api_client.post(api_routes.recipes_timeline_events, json=new_event_data, headers=unique_user.token)
-    new_event = RecipeTimelineEventOut.parse_obj(event_response.json())
+    event_response = api_client.post(api_routes.recipes_timeline_events, json=new_event_data, headers=user.token)
+    new_event = RecipeTimelineEventOut.model_validate(event_response.json())
     assert new_event.image == TimelineEventImage.does_not_have_image.value
+
+    with open(test_image_jpg, "rb") as f:
+        r = api_client.put(
+            api_routes.recipes_timeline_events_item_id_image(new_event.id),
+            files={"image": ("test_image_jpg.jpg", f, "image/jpeg")},
+            data={"extension": "jpg"},
+            headers=user.token,
+        )
+    r.raise_for_status()
+
+    update_image_response = UpdateImageResponse.model_validate(r.json())
+    assert update_image_response.image == TimelineEventImage.has_image.value
+
+    event_response = api_client.get(
+        api_routes.recipes_timeline_events_item_id(new_event.id),
+        headers=user.token,
+    )
+    assert event_response.status_code == 200
+
+    updated_event = RecipeTimelineEventOut.model_validate(event_response.json())
+    assert updated_event.subject == new_event.subject
+    assert updated_event.message == new_event.message
+    assert updated_event.timestamp == new_event.timestamp
+    assert updated_event.image == TimelineEventImage.has_image.value
+
+
+def test_timeline_event_remove_image(
+    api_client: TestClient,
+    unique_user: TestUser,
+    recipes: list[Recipe],
+    test_image_jpg: str,
+):
+    new_event_data = {
+        "recipe_id": str(recipes[0].id),
+        "user_id": str(unique_user.user_id),
+        "subject": random_string(),
+        "event_type": "info",
+    }
+    event_response = api_client.post(api_routes.recipes_timeline_events, json=new_event_data, headers=unique_user.token)
+    new_event = RecipeTimelineEventOut.model_validate(event_response.json())
 
     with open(test_image_jpg, "rb") as f:
         r = api_client.put(
@@ -253,39 +383,185 @@ def test_timeline_event_update_image(
         )
     r.raise_for_status()
 
-    update_image_response = UpdateImageResponse.parse_obj(r.json())
-    assert update_image_response.image == TimelineEventImage.has_image.value
+    image_files = list(new_event.image_dir.glob("*.webp"))
+    assert image_files
 
-    event_response = api_client.get(
+    event_response = api_client.put(
         api_routes.recipes_timeline_events_item_id(new_event.id),
+        json={"subject": new_event.subject, "image": TimelineEventImage.does_not_have_image.value},
         headers=unique_user.token,
     )
     assert event_response.status_code == 200
 
-    updated_event = RecipeTimelineEventOut.parse_obj(event_response.json())
-    assert updated_event.subject == new_event.subject
-    assert updated_event.message == new_event.message
-    assert updated_event.timestamp == new_event.timestamp
-    assert updated_event.image == TimelineEventImage.has_image.value
+    updated_event = RecipeTimelineEventOut.model_validate(event_response.json())
+    assert updated_event.image == TimelineEventImage.does_not_have_image.value
+    assert not any(image_file.exists() for image_file in image_files)
 
 
-def test_create_recipe_with_timeline_event(api_client: TestClient, unique_user: TestUser, recipes: list[Recipe]):
+@pytest.mark.parametrize("use_other_household_user", [True, False])
+def test_create_recipe_with_timeline_event(
+    api_client: TestClient,
+    unique_user: TestUser,
+    recipes: list[Recipe],
+    h2_user: TestUser,
+    use_other_household_user: bool,
+):
+    user = h2_user if use_other_household_user else unique_user
     # make sure when the recipes fixture was created that all recipes have at least one event
     for recipe in recipes:
         params = {"queryFilter": f"recipe_id={recipe.id}"}
-        events_response = api_client.get(api_routes.recipes_timeline_events, params=params, headers=unique_user.token)
-        events_pagination = RecipeTimelineEventPagination.parse_obj(events_response.json())
+        events_response = api_client.get(api_routes.recipes_timeline_events, params=params, headers=user.token)
+        events_pagination = RecipeTimelineEventPagination.model_validate(events_response.json())
         assert events_pagination.items
 
 
-def test_invalid_recipe_id(api_client: TestClient, unique_user: TestUser):
+@pytest.mark.parametrize("translation_key", PERSISTED_TRANSLATION_KEYS)
+def test_persisted_translation_keys_have_translations(translation_key: str):
+    translations = get_all_translations(translation_key)
+    missing_translations = [locale for locale, translation in translations.items() if translation == translation_key]
+
+    assert missing_translations == []
+
+
+def test_recipe_created_system_event_is_translated(
+    api_client: TestClient,
+    unique_user: TestUser,
+    recipes: list[Recipe],
+):
+    recipe = recipes[0]
+    params = {"queryFilter": f"recipe_id={recipe.id}"}
+
+    # read the French string from the locale file, since Crowdin owns its exact wording
+    expected_fr = get_all_translations(RECIPE_CREATED_EVENT_SUBJECT)["fr-FR"]
+    assert expected_fr != "Recipe Created"
+
+    # fetch events in French — the system "recipe created" event should be translated
+    fr_headers = {**unique_user.token, "Accept-Language": "fr-FR"}
+    events_response = api_client.get(api_routes.recipes_timeline_events, params=params, headers=fr_headers)
+    assert events_response.status_code == 200
+    events_pagination = RecipeTimelineEventPagination.model_validate(events_response.json())
+
+    system_events = [e for e in events_pagination.items if e.event_type == TimelineEventType.system.value]
+    assert system_events, "expected at least one system event for a newly created recipe"
+
+    for event in system_events:
+        assert event.subject == expected_fr, f"expected French translation, got: {event.subject!r}"
+
+        # also verify the individual GET endpoint translates correctly
+        single_response = api_client.get(api_routes.recipes_timeline_events_item_id(event.id), headers=fr_headers)
+        assert single_response.status_code == 200
+        single_event = RecipeTimelineEventOut.model_validate(single_response.json())
+        assert single_event.subject == expected_fr
+
+    # fetch the same events in English — subject should be the English string
+    en_headers = {**unique_user.token, "Accept-Language": "en-US"}
+    events_response = api_client.get(api_routes.recipes_timeline_events, params=params, headers=en_headers)
+    events_pagination = RecipeTimelineEventPagination.model_validate(events_response.json())
+
+    system_events = [e for e in events_pagination.items if e.event_type == TimelineEventType.system.value]
+    for event in system_events:
+        assert event.subject == "Recipe Created", f"expected English string, got: {event.subject!r}"
+
+
+@pytest.mark.parametrize("use_other_household_user", [True, False])
+def test_invalid_recipe_id(
+    api_client: TestClient, unique_user: TestUser, h2_user: TestUser, use_other_household_user: bool
+):
+    user = h2_user if use_other_household_user else unique_user
     new_event_data = {
         "recipe_id": str(uuid4()),
-        "user_id": unique_user.user_id,
+        "user_id": str(user.user_id),
         "subject": random_string(),
         "event_type": "info",
         "message": random_string(),
     }
 
-    event_response = api_client.post(api_routes.recipes_timeline_events, json=new_event_data, headers=unique_user.token)
+    event_response = api_client.post(api_routes.recipes_timeline_events, json=new_event_data, headers=user.token)
     assert event_response.status_code == 404
+
+
+def _create_owned_event(api_client: TestClient, owner: TestUser, recipe: Recipe) -> RecipeTimelineEventOut:
+    response = api_client.post(
+        api_routes.recipes_timeline_events,
+        json={"recipe_id": str(recipe.id), "subject": random_string(), "event_type": "info"},
+        headers=owner.token,
+    )
+    assert response.status_code == 201
+    return RecipeTimelineEventOut.model_validate(response.json())
+
+
+def test_create_timeline_event_ignores_forged_user_id(
+    api_client: TestClient, unique_user: TestUser, h2_user: TestUser, recipes: list[Recipe]
+):
+    response = api_client.post(
+        api_routes.recipes_timeline_events,
+        json={
+            "recipe_id": str(recipes[0].id),
+            "user_id": str(unique_user.user_id),
+            "subject": random_string(),
+            "event_type": "info",
+        },
+        headers=h2_user.token,
+    )
+    assert response.status_code == 201
+    assert str(RecipeTimelineEventOut.model_validate(response.json()).user_id) == str(h2_user.user_id)
+
+
+@pytest.mark.parametrize("other_user_fixture", ["h2_user", "unprivileged_user"])
+def test_non_author_cannot_modify_timeline_event(
+    request: pytest.FixtureRequest,
+    api_client: TestClient,
+    unique_user: TestUser,
+    recipes: list[Recipe],
+    test_image_jpg: str,
+    other_user_fixture: str,
+):
+    other_user: TestUser = request.getfixturevalue(other_user_fixture)
+    event = _create_owned_event(api_client, unique_user, recipes[0])
+    item_url = api_routes.recipes_timeline_events_item_id(event.id)
+
+    response = api_client.put(item_url, json={"subject": random_string()}, headers=other_user.token)
+    assert response.status_code == 403
+
+    with open(test_image_jpg, "rb") as f:
+        response = api_client.put(
+            api_routes.recipes_timeline_events_item_id_image(event.id),
+            files={"image": ("test_image_jpg.jpg", f, "image/jpeg")},
+            data={"extension": "jpg"},
+            headers=other_user.token,
+        )
+    assert response.status_code == 403
+    assert not any(event.image_dir.rglob("*.*"))
+
+    response = api_client.delete(item_url, headers=other_user.token)
+    assert response.status_code == 403
+
+    response = api_client.get(item_url, headers=unique_user.token)
+    assert response.status_code == 200
+    unchanged = RecipeTimelineEventOut.model_validate(response.json())
+    assert unchanged.subject == event.subject
+    assert unchanged.image == TimelineEventImage.does_not_have_image.value
+
+
+def test_other_group_user_cannot_see_timeline_event(
+    api_client: TestClient, unique_user: TestUser, g2_user: TestUser, recipes: list[Recipe]
+):
+    event = _create_owned_event(api_client, unique_user, recipes[0])
+    item_url = api_routes.recipes_timeline_events_item_id(event.id)
+
+    assert api_client.put(item_url, json={"subject": random_string()}, headers=g2_user.token).status_code == 404
+    assert api_client.delete(item_url, headers=g2_user.token).status_code == 404
+
+
+def test_admin_can_modify_and_delete_other_users_timeline_event(
+    api_client: TestClient, unique_user: TestUser, unique_admin: TestUser, recipes: list[Recipe]
+):
+    event = _create_owned_event(api_client, unique_user, recipes[0])
+    item_url = api_routes.recipes_timeline_events_item_id(event.id)
+
+    new_subject = random_string()
+    response = api_client.put(item_url, json={"subject": new_subject}, headers=unique_admin.token)
+    assert response.status_code == 200
+    assert response.json()["subject"] == new_subject
+
+    assert api_client.delete(item_url, headers=unique_admin.token).status_code == 200

@@ -1,6 +1,5 @@
 site_name: Mealie
-demo_url: https://demo.mealie.io
-site_url: https://hay-kot.github.io/mealie/
+site_url: https://docs.mealie.io
 use_directory_urls: true
 theme:
   palette:
@@ -16,9 +15,10 @@ theme:
       toggle:
         icon: material/weather-sunny
         name: Switch to light mode
-  custom_dir: docs/overrides
+  custom_dir: overrides
   features:
     - content.code.annotate
+    - content.code.copy
     - navigation.top
     - navigation.instant
     - navigation.expand
@@ -27,13 +27,16 @@ theme:
     - navigation.tabs.sticky
   favicon: assets/img/favicon.png
   name: material
+  font:
+    text: Roboto
+    code: Roboto Mono
   icon:
     logo: material/silverware-variant
 
 markdown_extensions:
   - pymdownx.emoji:
-      emoji_index: !!python/name:materialx.emoji.twemoji
-      emoji_generator: !!python/name:materialx.emoji.to_svg
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - def_list
   - pymdownx.highlight
   - pymdownx.superfences
@@ -41,18 +44,22 @@ markdown_extensions:
       custom_checkbox: true
   - admonition
   - attr_list
-  - pymdownx.tabbed
+  - pymdownx.tabbed:
+      alternate_style: true
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.details
+extra:
+  demo_url: https://demo.mealie.io
 extra_css:
   - assets/stylesheets/custom.css
 extra_javascript:
   - assets/js/extra.js
-repo_url: https://github.com/hay-kot/mealie/
-repo_name: hay-kot/mealie
+repo_url: https://github.com/mealie-recipes/mealie/
+repo_name: mealie-recipes/mealie
 edit_uri: edit/mealie-next/docs/docs/
 
 nav:
@@ -65,48 +72,47 @@ nav:
       - FAQ: "documentation/getting-started/faq.md"
       - API: "documentation/getting-started/api-usage.md"
       - Road Map: "documentation/getting-started/roadmap.md"
-      - Advanced: "documentation/getting-started/installation/advanced.md"
 
       - Installation:
           - Installation Checklist: "documentation/getting-started/installation/installation-checklist.md"
           - SQLite (Recommended): "documentation/getting-started/installation/sqlite.md"
           - PostgreSQL: "documentation/getting-started/installation/postgres.md"
           - Backend Configuration: "documentation/getting-started/installation/backend-config.md"
+          - Security: "documentation/getting-started/installation/security.md"
+          - Logs: "documentation/getting-started/installation/logs.md"
+          - AI Providers: "documentation/getting-started/installation/ai-providers.md"
       - Usage:
           - Backup and Restoring: "documentation/getting-started/usage/backups-and-restoring.md"
-          - LDAP Authentication: "documentation/getting-started/usage/ldap.md"
+          - Permissions and Public Access: "documentation/getting-started/usage/permissions-and-public-access.md"
+
+      - Authentication:
+          - LDAP: "documentation/getting-started/authentication/ldap.md"
+          - OpenID Connect: "documentation/getting-started/authentication/oidc-v2.md"
 
       - Community Guides:
-          - iOS Shortcuts: "documentation/community-guide/ios.md"
-          - Reverse Proxy (SWAG): "documentation/community-guide/swag.md"
-          - Home Assistant: "documentation/community-guide/home-assistant.md"
+          - Bring API without internet exposure: "documentation/community-guide/bring-api.md"
+          - Automating Backups with n8n: "documentation/community-guide/n8n-backup-automation.md"
           - Bulk Url Import: "documentation/community-guide/bulk-url-import.md"
+          - Home Assistant: "documentation/community-guide/home-assistant.md"
           - Import Bookmarklet: "documentation/community-guide/import-recipe-bookmarklet.md"
+          - iOS Shortcut: "documentation/community-guide/ios-shortcut.md"
+          - Reverse Proxy (SWAG): "documentation/community-guide/swag.md"
 
-  - API Reference: "api/redoc.md"
+  - API Reference: "https://demo.mealie.io/docs"
 
   - Contributors Guide:
       - Non-Code: "contributors/non-coders.md"
       - Translating: "contributors/translating.md"
       - Developers Guide:
+          - Building Packages: "contributors/developers-guide/building-packages.md"
           - Code Contributions: "contributors/developers-guide/code-contributions.md"
           - Dev Getting Started: "contributors/developers-guide/starting-dev-server.md"
+          - Database Changes: "contributors/developers-guide/database-changes.md"
+          - Maintainers Guide: "contributors/developers-guide/maintainers.md"
+          - Migration Guide: "contributors/developers-guide/migration-guide.md"
       - Guides:
           - Improving Ingredient Parser: "contributors/guides/ingredient-parser.md"
 
-  - Change Log:
-      - v1.0.0beta-5: "changelog/v1.0.0beta-5.md"
-      - v1.0.0beta-4: "changelog/v1.0.0beta-4.md"
-      - v1.0.0beta-3: "changelog/v1.0.0beta-3.md"
-      - v1.0.0beta-2: "changelog/v1.0.0beta-2.md"
-      - v1.0.0 Beta: "changelog/v1.0.0.md"
-      - v0.5.2 Misc Updates: "changelog/v0.5.2.md"
-      - v0.5.1 Bug Fixes: "changelog/v0.5.1.md"
-      - v0.5.0 General Upgrades: "changelog/v0.5.0.md"
-      - v0.4.3 Hot Fix: "changelog/v0.4.3.md"
-      - v0.4.2 Backend/Migrations: "changelog/v0.4.2.md"
-      - v0.4.1 Frontend/UI: "changelog/v0.4.1.md"
-      - v0.4.0 Authentication: "changelog/v0.4.0.md"
-      - v0.3.0 Improvements: "changelog/v0.3.0.md"
-      - v0.2.0 Now With Tests!: "changelog/v0.2.0.md"
-      - v0.1.0 Beta: "changelog/v0.1.0.md"
+  - News:
+      - Surveys:
+          - October 2024: "news/surveys/2024-october/overview.md"

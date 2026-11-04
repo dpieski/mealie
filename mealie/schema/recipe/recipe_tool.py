@@ -1,15 +1,14 @@
-from pydantic import UUID4
+from pydantic import UUID4, ConfigDict, field_validator
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.interfaces import LoaderOption
 
+from mealie.db.models.recipe import RecipeModel, Tool
 from mealie.schema._mealie import MealieModel
-
-from ...db.models.recipe import RecipeModel, Tool
 
 
 class RecipeToolCreate(MealieModel):
     name: str
-    on_hand: bool = False
+    households_with_tool: list[str] = []
 
 
 class RecipeToolSave(RecipeToolCreate):
@@ -18,21 +17,42 @@ class RecipeToolSave(RecipeToolCreate):
 
 class RecipeToolOut(RecipeToolCreate):
     id: UUID4
+    group_id: UUID4
     slug: str
+    recipe_count: int = 0
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
+    @field_validator("households_with_tool", mode="before")
+    def convert_households_to_slugs(cls, v):
+        if not v:
+            return []
 
-class RecipeToolResponse(RecipeToolOut):
-    recipes: list["RecipeSummary"] = []
-
-    class Config:
-        orm_mode = True
+        try:
+            return [household.slug for household in v]
+        except AttributeError:
+            return v
 
     @classmethod
     def loader_options(cls) -> list[LoaderOption]:
         return [
+            selectinload(Tool.households_with_tool),
+        ]
+
+
+class RecipeToolMerge(MealieModel):
+    from_id: UUID4
+    to_id: UUID4
+
+
+class RecipeToolResponse(RecipeToolOut):
+    recipes: list[RecipeSummary] = []
+    model_config = ConfigDict(from_attributes=True)
+
+    @classmethod
+    def loader_options(cls) -> list[LoaderOption]:
+        return [
+            selectinload(Tool.households_with_tool),
             selectinload(Tool.recipes).joinedload(RecipeModel.recipe_category),
             selectinload(Tool.recipes).joinedload(RecipeModel.tags),
             selectinload(Tool.recipes).joinedload(RecipeModel.tools),
@@ -41,4 +61,4 @@ class RecipeToolResponse(RecipeToolOut):
 
 from .recipe import RecipeSummary  # noqa: E402
 
-RecipeToolResponse.update_forward_refs()
+RecipeToolResponse.model_rebuild()

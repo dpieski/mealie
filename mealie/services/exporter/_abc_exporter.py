@@ -27,7 +27,7 @@ class ExportedItem:
 
 
 class ABCExporter(BaseService):
-    write_dir_to_zip: Callable[[Path, str, set[str] | None], None] | None
+    write_dir_to_zip: Callable[[Path, str, set[str] | None], None] | None = None
 
     def __init__(self, db: AllRepositories, group_id: UUID) -> None:
         self.logger = get_logger()
@@ -37,12 +37,10 @@ class ABCExporter(BaseService):
         super().__init__()
 
     @abstractproperty
-    def destination_dir(self) -> str:
-        ...
+    def destination_dir(self) -> str: ...
 
     @abstractmethod
-    def items(self) -> Iterator[ExportedItem]:
-        ...
+    def items(self) -> Iterator[ExportedItem]: ...
 
     def _post_export_hook(self, _: BaseModel) -> None:
         pass
@@ -65,7 +63,7 @@ class ABCExporter(BaseService):
                 self.logger.error("Failed to export item. no item found")
                 continue
 
-            zip.writestr(f"{self.destination_dir}/{item.name}/{item.name}.json", item.model.json())
+            zip.writestr(f"{self.destination_dir}/{item.name}/{item.name}.json", item.model.model_dump_json())
 
             self._post_export_hook(item.model)
 

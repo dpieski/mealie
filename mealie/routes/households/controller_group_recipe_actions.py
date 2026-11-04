@@ -1,0 +1,123 @@
+from functools import cached_property
+
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, status
+from fastapi.encoders import jsonable_encoder
+from pydantic import UUID4
+
+from mealie.core.config import get_app_settings
+from mealie.core.exceptions import NoEntryFound
+from mealie.pkgs import safehttp
+from mealie.routes._base.base_controllers import BaseUserController
+from mealie.routes._base.controller import controller
+from mealie.routes._base.mixins import HttpRepo
+from mealie.routes._base.permissions import Perm, not_found, require
+from mealie.schema.household.group_recipe_action import (
+    CreateGroupRecipeAction,
+    GroupRecipeActionOut,
+    GroupRecipeActionPagination,
+    GroupRecipeActionPayload,
+    GroupRecipeActionType,
+    SaveGroupRecipeAction,
+)
+from mealie.schema.response import ErrorResponse
+from mealie.schema.response.pagination import PaginationQuery
+from mealie.services.recipe.recipe_service import RecipeService
+
+router = APIRouter(prefix="/households/recipe-actions", tags=["Households: Recipe Actions"])
+
+
+@controller(router)
+class GroupRecipeActionController(BaseUserController):
+    @cached_property
+    def repo(self):
+        return self.repos.group_recipe_actions
+
+    @property
+    def mixins(self):
+        return HttpRepo[CreateGroupRecipeAction, GroupRecipeActionOut, SaveGroupRecipeAction](self.repo, self.logger)
+
+    # ==================================================================================================================
+    # CRUD
+
+    @router.get("", response_model=GroupRecipeActionPagination)
+    def get_all(self, q: PaginationQuery = Depends(PaginationQuery)):
+        response = self.repo.page_all(
+            pagination=q,
+            override=GroupRecipeActionOut,
+        )
+
+        response.set_pagination_guides(router.url_path_for("get_all"), q.model_dump())
+        return response
+
+    @router.post("", response_model=GroupRecipeActionOut, status_code=201, dependencies=[require(Perm.GROUP_ORGANIZE)])
+    def create_one(self, data: CreateGroupRecipeAction):
+        save = data.cast(SaveGroupRecipeAction, group_id=self.group_id, household_id=self.household_id)
+        return self.mixins.create_one(save)
+
+    @router.get("/{item_id}", response_model=GroupRecipeActionOut)
+    def get_one(self, item_id: UUID4):
+        return self.mixins.get_one(item_id)
+
+    @router.put("/{item_id}", response_model=GroupRecipeActionOut, dependencies=[require(Perm.GROUP_ORGANIZE)])
+    def update_one(self, item_id: UUID4, data: SaveGroupRecipeAction):
+        return self.mixins.update_one(data, item_id)
+
+    @router.delete("/{item_id}", response_model=GroupRecipeActionOut, dependencies=[require(Perm.GROUP_ORGANIZE)])
+    def delete_one(self, item_id: UUID4):
+        return self.mixins.delete_one(item_id)
+
+    # ==================================================================================================================
+    # Actions
+
+    @router.post("/{item_id}/trigger/{recipe_slug}", status_code=202)
+    def trigger_action(
+        self, item_id: UUID4, recipe_slug: str, bg_tasks: BackgroundTasks, recipe_scale: float = Body(1, embed=True)
+    ) -> None:
+        recipe_action = self.repos.group_recipe_actions.get_one(item_id)
+        if not recipe_action:
+            raise not_found("Not found.")
+
+        if recipe_action.action_type == GroupRecipeActionType.post.value:
+            task_action = safehttp.post
+        else:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail=ErrorResponse.respond(message=f'Cannot trigger action type "{recipe_action.action_type}".'),
+            )
+
+        recipe_service = RecipeService(self.repos, self.user, self.household, translator=self.translator)
+        try:
+            recipe = recipe_service.get_one(recipe_slug)
+        except NoEntryFound as e:
+            raise not_found("Not found.") from e
+
+        settings = get_app_settings()
+        # The POST runs as a background task, where a blocked target fails without the user
+        # ever seeing it. Check the target here so a blocked URL gets an error response.
+        try:
+            safehttp.validate_url(
+                recipe_action.url,
+                allow_hosts=settings.http_allow_list,
+                deny_hosts=settings.http_disallow_list,
+                log=self.logger,
+            )
+        except safehttp.InvalidDomainError as e:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail=ErrorResponse.respond(
+                    message=(
+                        "The action URL can't be used: it doesn't resolve, or it points to a local or "
+                        "disallowed address. To allow a trusted local host, add it to HTTP_ALLOW_LIST."
+                    )
+                ),
+            ) from e
+
+        payload = GroupRecipeActionPayload(action=recipe_action, content=recipe, recipe_scale=recipe_scale)
+        bg_tasks.add_task(
+            task_action,
+            url=recipe_action.url,
+            json=jsonable_encoder(payload.model_dump()),
+            timeout=15,
+            allow_hosts=settings.http_allow_list,
+            deny_hosts=settings.http_disallow_list,
+        )

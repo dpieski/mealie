@@ -3,23 +3,21 @@ This file contains code taken from fastapi-utils project. The code is licensed u
 
 See their repository for details -> https://github.com/dmontagu/fastapi-utils
 """
+
 import inspect
 from collections.abc import Callable
-from typing import Any, TypeVar, cast, get_type_hints
+from typing import Any, ClassVar, ForwardRef, cast, get_origin, get_type_hints
 
 from fastapi import APIRouter, Depends
 from fastapi.routing import APIRoute
-from pydantic.typing import is_classvar
 from starlette.routing import Route, WebSocketRoute
-
-T = TypeVar("T")
 
 CBV_CLASS_KEY = "__cbv_class__"
 INCLUDE_INIT_PARAMS_KEY = "__include_init_params__"
 RETURN_TYPES_FUNC_KEY = "__return_types_func__"
 
 
-def controller(router: APIRouter, *urls: str) -> Callable[[type[T]], type[T]]:
+def controller[T](router: APIRouter, *urls: str) -> Callable[[type[T]], type[T]]:
     """
     This function returns a decorator that converts the decorated into a class-based view for the provided router.
     Any methods of the decorated class that are decorated as endpoints using the router provided to this function
@@ -36,7 +34,7 @@ def controller(router: APIRouter, *urls: str) -> Callable[[type[T]], type[T]]:
     return decorator
 
 
-def _cbv(router: APIRouter, cls: type[T], *urls: str, instance: Any | None = None) -> type[T]:
+def _cbv[T](router: APIRouter, cls: type[T], *urls: str, instance: Any | None = None) -> type[T]:
     """
     Replaces any methods of the provided class `cls` that are endpoints of routes in `router` with updated
     function calls that will properly inject an instance of `cls`.
@@ -44,6 +42,25 @@ def _cbv(router: APIRouter, cls: type[T], *urls: str, instance: Any | None = Non
     _init_cbv(cls, instance)
     _register_endpoints(router, cls, *urls)
     return cls
+
+
+# copied from Pydantic V1 Source: https://github.com/pydantic/pydantic/blob/1c91c8627b541b22354b9ed56b9ef1bb21ac6fbd/pydantic/v1/typing.py
+def _check_classvar(v: type[Any] | None) -> bool:
+    if v is None:
+        return False
+
+    return v.__class__ == ClassVar.__class__ and getattr(v, "_name", None) == "ClassVar"
+
+
+# copied from Pydantic V1 Source: https://github.com/pydantic/pydantic/blob/1c91c8627b541b22354b9ed56b9ef1bb21ac6fbd/pydantic/v1/typing.py
+def _is_classvar(ann_type: type[Any]) -> bool:
+    if _check_classvar(ann_type) or _check_classvar(get_origin(ann_type)):
+        return True
+
+    if ann_type.__class__ == ForwardRef and ann_type.__forward_arg__.startswith("ClassVar["):  # type: ignore
+        return True
+
+    return False
 
 
 def _init_cbv(cls: type[Any], instance: Any | None = None) -> None:
@@ -66,7 +83,7 @@ def _init_cbv(cls: type[Any], instance: Any | None = None) -> None:
 
     dependency_names: list[str] = []
     for name, hint in get_type_hints(cls).items():
-        if is_classvar(hint):
+        if _is_classvar(hint):
             continue
 
         if name.startswith("_"):

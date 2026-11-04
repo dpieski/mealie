@@ -7,7 +7,7 @@ from . import (
     comments,
     explore,
     groups,
-    ocr,
+    households,
     organizers,
     parser,
     recipe,
@@ -22,6 +22,7 @@ router = APIRouter(prefix="/api")
 router.include_router(app.router)
 router.include_router(auth.router)
 router.include_router(users.router)
+router.include_router(households.router)
 router.include_router(groups.router)
 router.include_router(recipe.router)
 router.include_router(organizers.router)
@@ -32,4 +33,3 @@ router.include_router(unit_and_foods.router)
 router.include_router(admin.router)
 router.include_router(validators.router)
 router.include_router(explore.router)
-router.include_router(ocr.router)

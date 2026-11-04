@@ -1,8 +1,8 @@
 from functools import wraps
 from uuid import UUID
 
-from pydantic import BaseModel, Field, NoneStr
-from sqlalchemy import select
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import inspect, select
 from sqlalchemy.orm import MANYTOMANY, MANYTOONE, ONETOMANY, Session
 from sqlalchemy.orm.mapper import Mapper
 from sqlalchemy.orm.relationships import RelationshipProperty
@@ -21,26 +21,33 @@ class AutoInitConfig(BaseModel):
     Config class for `auto_init` decorator.
     """
 
-    get_attr: NoneStr = None
+    get_attr: str | None = None
     exclude: set = Field(default_factory=_default_exclusion)
     # auto_create: bool = False
 
 
-def _get_config(relation_cls: type[SqlAlchemyBase]) -> AutoInitConfig:
+def _get_config(relation_cls: type[SqlAlchemyBase], *, protect_primary_key: bool = True) -> AutoInitConfig:
     """
     Returns the config for the given class.
+
+    `protect_primary_key` merges the default `{"id"}` exclusion into the model's own `exclude`.
     """
     cfg = AutoInitConfig()
-    cfgKeys = cfg.dict().keys()
+    cfgKeys = cfg.model_dump().keys()
     # Get the config for the class
     try:
-        class_config: AutoInitConfig = relation_cls.Config
+        class_config: ConfigDict = relation_cls.model_config
     except AttributeError:
         return cfg
     # Map all matching attributes in Config to all AutoInitConfig attributes
-    for attr in dir(class_config):
-        if attr in cfgKeys:
-            setattr(cfg, attr, getattr(class_config, attr))
+    for attr in class_config:
+        if attr not in cfgKeys:
+            continue
+
+        if attr == "exclude" and protect_primary_key:
+            cfg.exclude = cfg.exclude | set(class_config[attr])
+        else:
+            setattr(cfg, attr, class_config[attr])
 
     return cfg
 
@@ -97,7 +104,7 @@ def handle_one_to_many_list(
 
         updated_elems.append(existing_elem)
 
-    new_elems = [safe_call(relation_cls, elem, session=session) for elem in elems_to_create]
+    new_elems = [safe_call(relation_cls, elem.copy(), session=session) for elem in elems_to_create]
     return new_elems + updated_elems
 
 
@@ -121,7 +128,7 @@ def auto_init():  # sourcery no-metrics
             Ref: https://github.com/tiangolo/fastapi/issues/2194
             """
             cls = self.__class__
-            config = _get_config(cls)
+            config = _get_config(cls, protect_primary_key=not inspect(self).transient)
             exclude = config.exclude
 
             alchemy_mapper: Mapper = self.__mapper__
@@ -164,18 +171,24 @@ def auto_init():  # sourcery no-metrics
                         setattr(self, key, instances)
 
                     elif relation_dir == ONETOMANY:
-                        instance = safe_call(relation_cls, val, session=session)
+                        instance = safe_call(relation_cls, val.copy() if val else None, session=session)
                         setattr(self, key, instance)
 
                     elif relation_dir == MANYTOONE and not use_list:
+                        lookup_attr = get_attr
                         if isinstance(val, dict):
-                            val = val.get(get_attr)
+                            # Prefer primary key when provided to avoid ambiguous alternate-key lookups
+                            if "id" in val and val["id"] is not None:
+                                lookup_attr = "id"
+                                val = val["id"]
+                            else:
+                                val = val.get(get_attr)
 
                             if val is None:
-                                raise ValueError(f"Expected 'id' to be provided for {key}")
+                                raise ValueError(f"Expected '{lookup_attr}' to be provided for {key}")
 
                         if isinstance(val, str | int | UUID):
-                            stmt = select(relation_cls).filter_by(**{get_attr: val})
+                            stmt = select(relation_cls).filter_by(**{lookup_attr: val})
                             instance = session.execute(stmt).scalars().one_or_none()
                             setattr(self, key, instance)
                         else:

@@ -14,10 +14,13 @@
     "webp"
   ],
   "editor.codeActionsOnSave": {
-    "source.fixAll.eslint": true,
-    "source.organizeImports": false
+    "source.fixAll.eslint": "explicit",
+    "source.organizeImports": "never"
   },
+  "editor.insertSpaces": true,
+  "editor.tabSize": 2,
   "editor.formatOnSave": true,
+  "eslint.useFlatConfig": true,
   "eslint.workingDirectories": [
     "./frontend"
   ],
@@ -29,20 +32,14 @@
     "**/.svn": true,
     "**/CVS": true
   },
+  "files.insertFinalNewline": true,
   "i18n-ally.enabledFrameworks": [
     "vue"
   ],
   "i18n-ally.keystyle": "nested",
-  "i18n-ally.localesPaths": "frontend/lang/messages",
+  "i18n-ally.localesPaths": "frontend/app/lang/messages",
   "i18n-ally.sourceLanguage": "en-US",
   "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
-  "python.formatting.provider": "black",
-  "python.linting.enabled": true,
-  "python.linting.flake8Enabled": false,
-  "python.linting.pylintEnabled": false,
-  "python.linting.pylintArgs": [
-    "--rcfile=${workspaceFolder}/.pylintrc"
-  ],
   "python.testing.autoTestDiscoverOnSaveEnabled": false,
   "python.testing.pytestArgs": [
     "tests"
@@ -50,7 +47,6 @@
   "python.testing.pytestEnabled": true,
   "python.testing.unittestEnabled": false,
   "python.analysis.typeCheckingMode": "off",
-  "python.linting.mypyEnabled": true,
   "search.mode": "reuseEditor",
   "python.testing.unittestArgs": [
     "-v",
@@ -61,12 +57,20 @@
   ],
   "explorer.fileNesting.enabled": true,
   "explorer.fileNesting.patterns": {
-    "package.json": "package-lock.json, yarn.lock, .eslintrc.js, tsconfig.json, .prettierrc, .editorconfig",
-    "pyproject.toml": "poetry.lock, alembic.ini, .pylintrc",
+    "package.json": "package-lock.json, pnpm-lock.yaml, .eslintrc.js, tsconfig.json, .prettierrc, .editorconfig",
+    "pyproject.toml": "uv.lock, alembic.ini, .pylintrc",
     "netlify.toml": "runtime.txt",
     "README.md": "LICENSE, SECURITY.md"
   },
-  "[vue]": {
-    "editor.formatOnSave": false
+  "[typescript]": {
+    "editor.formatOnSave": true
   },
+  "[vue]": {
+    "editor.formatOnSave": true
+  },
+  "[python]": {
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.tabSize": 4
+  }
 }

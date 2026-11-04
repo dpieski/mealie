@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 
+from mealie.lang.providers import get_locale_provider
 from mealie.services.scraper import cleaner
 
 
@@ -60,6 +61,36 @@ clean_string_test_cases = (
         test_id="int",
         input=1,
         expected="1",
+    ),
+    CleanerCase(
+        test_id="float",
+        input=1.5,
+        expected="1.5",
+    ),
+    CleanerCase(
+        test_id="none",
+        input=None,
+        expected="",
+    ),
+    CleanerCase(
+        test_id="list empty",
+        input=[],
+        expected="",
+    ),
+    CleanerCase(
+        test_id="list none",
+        input=[None],
+        expected="",
+    ),
+    CleanerCase(
+        test_id="list multiple none",
+        input=[None, None],
+        expected="",
+    ),
+    CleanerCase(
+        test_id="unexpected type",
+        input={"key": "value"},
+        expected="{'key': 'value'}",
     ),
 )
 
@@ -194,6 +225,55 @@ instruction_test_cases = (
         expected=None,
     ),
     CleanerCase(
+        test_id="how to steps with empty section (e.g. NYT Cooking)",
+        input=[
+            {
+                "@type": "HowToSection",
+            },
+            {
+                "@type": "HowToSection",
+                "itemListElement": [
+                    {
+                        "@type": "HowToStep",
+                        "text": "Instruction A",
+                    },
+                    {
+                        "@type": "HowToStep",
+                        "text": "Instruction B",
+                    },
+                    {
+                        "@type": "HowToStep",
+                        "text": "Instruction C",
+                    },
+                ],
+            },
+        ],
+        expected=None,
+    ),
+    CleanerCase(
+        test_id="how to steps using 'item' key (schema.org alternate)",
+        input=[
+            {
+                "@type": "HowToSection",
+                "item": [
+                    {
+                        "@type": "HowToStep",
+                        "text": "Instruction A",
+                    },
+                    {
+                        "@type": "HowToStep",
+                        "text": "Instruction B",
+                    },
+                    {
+                        "@type": "HowToStep",
+                        "text": "Instruction C",
+                    },
+                ],
+            },
+        ],
+        expected=None,
+    ),
+    CleanerCase(
         test_id="excessive whitespace str (1)",
         input="Instruction A\n\nInstruction B\n\nInstruction C\n\n",
         expected=None,
@@ -213,20 +293,230 @@ instruction_test_cases = (
         input="Instruction A\r\nInstruction B\r\nInstruction C\r\n",
         expected=None,
     ),
+    CleanerCase(
+        test_id="how to sections with names",
+        input=[
+            {
+                "@type": "HowToSection",
+                "name": "Section A",
+                "itemListElement": [
+                    {"@type": "HowToStep", "text": "Instruction A"},
+                    {"@type": "HowToStep", "text": "Instruction B"},
+                ],
+            },
+            {
+                "@type": "HowToSection",
+                "name": "Section B",
+                "itemListElement": [
+                    {"@type": "HowToStep", "text": "Instruction C"},
+                ],
+            },
+        ],
+        expected=[
+            {"text": "Instruction A", "title": "Section A"},
+            {"text": "Instruction B"},
+            {"text": "Instruction C", "title": "Section B"},
+        ],
+    ),
+    CleanerCase(
+        test_id="how to sections with names using 'item' key",
+        input=[
+            {
+                "@type": "HowToSection",
+                "name": "Section A",
+                "item": [
+                    {"@type": "HowToStep", "text": "Instruction A"},
+                    {"@type": "HowToStep", "text": "Instruction B"},
+                ],
+            },
+        ],
+        expected=[
+            {"text": "Instruction A", "title": "Section A"},
+            {"text": "Instruction B"},
+        ],
+    ),
+    CleanerCase(
+        test_id="how to section name is cleaned like any other string",
+        input=[
+            {
+                "@type": "HowToSection",
+                "name": "<p> Section&nbsp;A </p>",
+                "itemListElement": [
+                    {"@type": "HowToStep", "text": "Instruction A"},
+                ],
+            },
+        ],
+        expected=[{"text": "Instruction A", "title": "Section A"}],
+    ),
+    CleanerCase(
+        test_id="empty how to section name is not stored as a title",
+        input=[
+            {
+                "@type": "HowToSection",
+                "name": "",
+                "itemListElement": [
+                    {"@type": "HowToStep", "text": "Instruction A"},
+                ],
+            },
+        ],
+        expected=[{"text": "Instruction A"}],
+    ),
+    CleanerCase(
+        test_id="named how to section skipped when it has no steps",
+        input=[
+            {"@type": "HowToSection", "name": "Section A"},
+            {
+                "@type": "HowToSection",
+                "name": "Section B",
+                "itemListElement": [
+                    {"@type": "HowToStep", "text": "Instruction A"},
+                ],
+            },
+        ],
+        expected=[{"text": "Instruction A", "title": "Section B"}],
+    ),
+    CleanerCase(
+        test_id="bare how to section dict wrapping a single step dict (rezeptwelt.de)",
+        input={
+            "@type": "HowToSection",
+            "name": "Section A",
+            "itemListElement": {"@type": "HowToStep", "text": "Instruction A"},
+        },
+        expected=[{"text": "Instruction A", "title": "Section A"}],
+    ),
+    CleanerCase(
+        test_id="loose steps mixed with sections in one list (cookbook.pfeiffer.net.au)",
+        input=[
+            {"@type": "HowToStep", "text": "Instruction A"},
+            {
+                "@type": "HowToSection",
+                "name": "Section B",
+                "itemListElement": [
+                    {"@type": "HowToStep", "text": "Instruction B"},
+                    {"@type": "HowToStep", "text": "Instruction C"},
+                ],
+            },
+        ],
+        expected=[
+            {"text": "Instruction A"},
+            {"text": "Instruction B", "title": "Section B"},
+            {"text": "Instruction C"},
+        ],
+    ),
+    CleanerCase(
+        test_id="step summaries are preserved",
+        input=[
+            {"@type": "HowToStep", "summary": "Step heading A", "text": "Instruction A"},
+            {"@type": "HowToStep", "text": "Instruction B"},
+        ],
+        expected=[
+            {"text": "Instruction A", "summary": "Step heading A"},
+            {"text": "Instruction B"},
+        ],
+    ),
+    CleanerCase(
+        test_id="section headings and step summaries live side by side",
+        input=[
+            {
+                "@type": "HowToSection",
+                "name": "Section A",
+                "itemListElement": [
+                    {"@type": "HowToStep", "summary": "Step heading A", "text": "Instruction A"},
+                ],
+            },
+        ],
+        expected=[{"text": "Instruction A", "title": "Section A", "summary": "Step heading A"}],
+    ),
+    CleanerCase(
+        test_id="capitalised section Name key (atelierdeschefs.fr)",
+        input=[
+            {
+                "@type": "HowToSection",
+                "Name": "Section A",
+                "itemListElement": [
+                    {"@type": "HowToStep", "text": "Instruction A"},
+                ],
+            },
+        ],
+        expected=[{"text": "Instruction A", "title": "Section A"}],
+    ),
+    CleanerCase(
+        test_id="step name becomes the step summary",
+        input=[
+            {"@type": "HowToStep", "name": "Mix", "text": "Instruction A"},
+            {"@type": "HowToStep", "text": "Instruction B"},
+        ],
+        expected=[
+            {"text": "Instruction A", "summary": "Mix"},
+            {"text": "Instruction B"},
+        ],
+    ),
+    CleanerCase(
+        test_id="step name repeating the text is not stored twice",
+        input=[
+            {"@type": "HowToStep", "name": "Instruction A", "text": "Instruction A"},
+            {"@type": "HowToStep", "name": "Instruction B, but truncat", "text": "Instruction B, but truncated"},
+        ],
+        expected=[
+            {"text": "Instruction A"},
+            {"text": "Instruction B, but truncated"},
+        ],
+    ),
+    CleanerCase(
+        test_id="step name repeating the text through html entities is not stored twice",
+        input=[
+            {"@type": "HowToStep", "name": "1. K&auml;...", "text": "1. K&auml;se in St&uuml;cken geben"},
+        ],
+        expected=[{"text": "1. Käse in Stücken geben"}],
+    ),
+    CleanerCase(
+        test_id="step name truncated from the text is not stored as a summary (yummly.com)",
+        input=[
+            {"@type": "HowToStep", "name": "Step 1: Preheat oven to 425\u2026", "text": "Preheat oven to 425 F."},
+            {"@type": "HowToStep", "name": "Mix", "text": "mix it all together"},
+        ],
+        expected=[
+            {"text": "Preheat oven to 425 F."},
+            {"text": "mix it all together"},
+        ],
+    ),
+    CleanerCase(
+        test_id="bare how to step dict",
+        input={"@type": "HowToStep", "text": "Instruction A"},
+        expected=[{"text": "Instruction A"}],
+    ),
 )
 
 
 @pytest.mark.parametrize("instructions", instruction_test_cases, ids=(x.test_id for x in instruction_test_cases))
 def test_cleaner_instructions(instructions: CleanerCase):
-    reuslt = cleaner.clean_instructions(instructions.input)
+    result = cleaner.clean_instructions(instructions.input)
 
-    expected = [
+    # most inputs boil down to the same three plain steps, so only cases that keep
+    # section titles carry an expectation of their own
+    expected = instructions.expected or [
         {"text": "Instruction A"},
         {"text": "Instruction B"},
         {"text": "Instruction C"},
     ]
 
-    assert reuslt == expected
+    assert result == expected
+
+
+def test_cleaner_instructions_preserves_title_and_summary():
+    """Regression test for GH #6887: JSON-edited recipes with per-step title/summary
+    fields were silently dropped by clean_instructions before ever reaching the DB."""
+    result = cleaner.clean_instructions(
+        [
+            {"text": "Preheat the oven to 400F.", "title": "Prep", "summary": "Get the oven ready"},
+            {"text": "Bake for 20 minutes."},
+        ]
+    )
+
+    assert result == [
+        {"text": "Preheat the oven to 400F.", "title": "Prep", "summary": "Get the oven ready"},
+        {"text": "Bake for 20 minutes."},
+    ]
 
 
 ingredients_test_cases = (
@@ -256,6 +546,24 @@ ingredients_test_cases = (
         test_id="multiple ingredient dictionary",
         exception=TypeError,
     ),
+    CleanerCase(
+        input=[
+            {"@type": "PronounceableText", "textValue": "1 cup of flour"},
+            {"@type": "PronounceableText", "textValue": "1 cup of sugar"},
+        ],
+        expected=["1 cup of flour", "1 cup of sugar"],
+        test_id="schema.org PronounceableText nodes",
+    ),
+    CleanerCase(
+        input=["1 cup of flour", {"@type": "PronounceableText", "textValue": "1 cup of sugar"}],
+        expected=["1 cup of flour", "1 cup of sugar"],
+        test_id="mixed strings and PronounceableText nodes",
+    ),
+    CleanerCase(
+        input=[{"name": "flour", "amount": "1 cup"}],
+        expected=[{"name": "flour", "amount": "1 cup"}],
+        test_id="dict without textValue is left untouched",
+    ),
 )
 
 
@@ -274,22 +582,102 @@ yield_test_cases = (
     CleanerCase(
         test_id="empty string",
         input="",
-        expected="",
+        expected=(0, 0, ""),
+    ),
+    CleanerCase(
+        test_id="regular string",
+        input="4 Batches",
+        expected=(0, 4, "Batches"),
+    ),
+    CleanerCase(
+        test_id="regular serving string",
+        input="4 Servings",
+        expected=(4, 0, ""),
+    ),
+    CleanerCase(
+        test_id="regular string with whitespace",
+        input="4   Batches    ",
+        expected=(0, 4, "Batches"),
+    ),
+    CleanerCase(
+        test_id="regular serving string with whitespace",
+        input="4   Servings    ",
+        expected=(4, 0, ""),
     ),
     CleanerCase(
         test_id="list of strings",
-        input=["Makes 4 Batches", "4 Batches"],
-        expected="4 Batches",
+        input=["Serves 2", "4 Batches", "5 Batches"],
+        expected=(2, 5, "Batches"),
     ),
     CleanerCase(
         test_id="basic string",
+        input="Makes a lot of Batches",
+        expected=(0, 0, "Makes a lot of Batches"),
+    ),
+    CleanerCase(
+        test_id="basic serving string",
         input="Makes 4 Batches",
-        expected="Makes 4 Batches",
+        expected=(4, 0, ""),
     ),
     CleanerCase(
         test_id="empty list",
         input=[],
-        expected="",
+        expected=(0, 0, ""),
+    ),
+    CleanerCase(
+        test_id="basic fraction",
+        input="1/2 Batches",
+        expected=(0, 0.5, "Batches"),
+    ),
+    CleanerCase(
+        test_id="mixed fraction",
+        input="1 1/2 Batches",
+        expected=(0, 1.5, "Batches"),
+    ),
+    CleanerCase(
+        test_id="improper fraction",
+        input="11/2 Batches",
+        expected=(0, 5.5, "Batches"),
+    ),
+    CleanerCase(
+        test_id="vulgar fraction",
+        input="¾ Batches",
+        expected=(0, 0.75, "Batches"),
+    ),
+    CleanerCase(
+        test_id="mixed vulgar fraction",
+        input="2¾ Batches",
+        expected=(0, 2.75, "Batches"),
+    ),
+    CleanerCase(
+        test_id="mixed vulgar fraction with space",
+        input="2 ¾ Batches",
+        expected=(0, 2.75, "Batches"),
+    ),
+    CleanerCase(
+        test_id="basic decimal",
+        input="0.5 Batches",
+        expected=(0, 0.5, "Batches"),
+    ),
+    CleanerCase(
+        test_id="text with numbers",
+        input="6 Batches or 10 Batches",
+        expected=(0, 6, "Batches or 10 Batches"),
+    ),
+    CleanerCase(
+        test_id="no qty",
+        input="A Lot of Servings",
+        expected=(0, 0, "A Lot of Servings"),
+    ),
+    CleanerCase(
+        test_id="invalid qty",
+        input="1/0 Batches",
+        expected=(0, 0, "1/0 Batches"),
+    ),
+    CleanerCase(
+        test_id="int as float",
+        input="3.0 Batches",
+        expected=(0, 3, "Batches"),
     ),
 )
 
@@ -324,37 +712,77 @@ time_test_cases = (
     CleanerCase(
         test_id="timedelta",
         input=timedelta(minutes=30),
-        expected="30 Minutes",
+        expected="30 minutes",
     ),
     CleanerCase(
         test_id="timedelta string (1)",
         input="PT2H30M",
-        expected="2 Hours 30 Minutes",
+        expected="2 hours 30 minutes",
     ),
     CleanerCase(
         test_id="timedelta string (2)",
         input="PT30M",
-        expected="30 Minutes",
+        expected="30 minutes",
     ),
     CleanerCase(
         test_id="timedelta string (3)",
         input="PT2H",
-        expected="2 Hours",
+        expected="2 hours",
     ),
     CleanerCase(
         test_id="timedelta string (4)",
         input="P1DT1H1M1S",
-        expected="1 day 1 Hour 1 Minute 1 Second",
+        expected="1 day 1 hour 1 minute 1 second",
     ),
     CleanerCase(
         test_id="timedelta string (4)",
         input="P1DT1H1M1.53S",
-        expected="1 day 1 Hour 1 Minute 1 Second",
+        expected="1 day 1 hour 1 minute 1 second",
     ),
     CleanerCase(
-        test_id="timedelta string (5) invalid",
+        test_id="timedelta string (5) empty",
         input="PT",
-        expected="none",
+        expected=None,
+    ),
+    CleanerCase(
+        test_id="timedelta string zero",
+        input="PT0S",
+        expected=None,
+    ),
+    CleanerCase(
+        test_id="timedelta zero",
+        input=timedelta(0),
+        expected=None,
+    ),
+    CleanerCase(
+        test_id="negative minutes",
+        input=-5,
+        expected=None,
+    ),
+    CleanerCase(
+        test_id="timedelta string months kept as text",
+        input="P1M",
+        expected="P1M",
+    ),
+    CleanerCase(
+        test_id="timedelta string negative kept as text",
+        input="-PT1H",
+        expected="-PT1H",
+    ),
+    CleanerCase(
+        test_id="timedelta string day only",
+        input="P1D",
+        expected="1 day",
+    ),
+    CleanerCase(
+        test_id="timedelta string days only",
+        input="P3D",
+        expected="3 days",
+    ),
+    CleanerCase(
+        test_id="timedelta string weeks only",
+        input="P1W",
+        expected="7 days",
     ),
     CleanerCase(
         test_id="timedelta string (6) PT-3H",
@@ -366,8 +794,43 @@ time_test_cases = (
 
 @pytest.mark.parametrize("case", time_test_cases, ids=(x.test_id for x in time_test_cases))
 def test_cleaner_clean_time(case: CleanerCase):
-    result = cleaner.clean_time(case.input)
+    translator = get_locale_provider()
+    result = cleaner.clean_time(case.input, translator)
     assert case.expected == result
+
+
+duration_test_cases = (
+    CleanerCase(test_id="none", input=None, expected=None),
+    CleanerCase(test_id="empty string", input="", expected=None),
+    CleanerCase(test_id="int minutes", input=30, expected=1800),
+    CleanerCase(test_id="float minutes", input=1.5, expected=90),
+    CleanerCase(test_id="string minutes", input="30", expected=1800),
+    CleanerCase(test_id="bool", input=True, expected=None),
+    CleanerCase(test_id="iso", input="PT1H30M", expected=5400),
+    CleanerCase(test_id="iso lowercase", input="pt15m", expected=900),
+    CleanerCase(test_id="iso days", input="P1DT1H", expected=90000),
+    CleanerCase(test_id="iso weeks", input="P1W", expected=604800),
+    CleanerCase(test_id="iso fractional seconds", input="PT1M1.53S", expected=62),
+    CleanerCase(test_id="timedelta", input=timedelta(hours=1), expected=3600),
+    CleanerCase(test_id="min value", input={"minValue": "PT1H"}, expected=3600),
+    CleanerCase(test_id="list", input=["PT1H", "PT2H"], expected=3600),
+    # Kept as text
+    CleanerCase(test_id="free text", input="1 hour 30 minutes", expected=None),
+    CleanerCase(test_id="iso months", input="P1M", expected=None),
+    CleanerCase(test_id="iso years", input="P1Y", expected=None),
+    CleanerCase(test_id="iso invalid", input="PT", expected=None),
+    CleanerCase(test_id="iso negative", input="PT-3H", expected=None),
+    CleanerCase(test_id="zero", input=0, expected=None),
+    CleanerCase(test_id="iso zero", input="PT0M", expected=None),
+    CleanerCase(test_id="negative", input=-5, expected=None),
+    CleanerCase(test_id="too large", input="P30000D", expected=None),
+    CleanerCase(test_id="infinite", input=float("inf"), expected=None),
+)
+
+
+@pytest.mark.parametrize("case", duration_test_cases, ids=(x.test_id for x in duration_test_cases))
+def test_cleaner_clean_duration(case: CleanerCase):
+    assert cleaner.clean_duration(case.input) == case.expected
 
 
 category_test_cases = (
@@ -398,6 +861,11 @@ category_test_cases = (
             {"name": "Lunch", "slug": "lunch"},
         ],
         expected=["Dessert", "Lunch"],
+    ),
+    CleanerCase(
+        test_id="numeric",
+        input=4,
+        expected=[],
     ),
 )
 
@@ -456,6 +924,24 @@ nutrition_test_cases = (
         },
     ),
     CleanerCase(
+        test_id="calories as int",
+        input={
+            "calories": 100,
+        },
+        expected={
+            "calories": "100",
+        },
+    ),
+    CleanerCase(
+        test_id="calories as float",
+        input={
+            "calories": 100.0,
+        },
+        expected={
+            "calories": "100.0",
+        },
+    ),
+    CleanerCase(
         test_id="invalid keys get removed",
         input={
             "calories": "100mg",
@@ -479,20 +965,24 @@ nutrition_test_cases = (
         },
     ),
     CleanerCase(
-        test_id="special support for sodiumContent (g -> mg)",
+        test_id="special support for sodiumContent/cholesterolContent (g -> mg)",
         input={
+            "cholesterolContent": "10g",
             "sodiumContent": "10g",
         },
         expected={
+            "cholesterolContent": "10000.0",
             "sodiumContent": "10000.0",
         },
     ),
     CleanerCase(
-        test_id="special support for sodiumContent (mg -> mg)",
+        test_id="special support for sodiumContent/cholesterolContent (mg -> mg)",
         input={
+            "cholesterolContent": "10000mg",
             "sodiumContent": "10000mg",
         },
         expected={
+            "cholesterolContent": "10000",
             "sodiumContent": "10000",
         },
     ),
@@ -533,13 +1023,106 @@ def test_cleaner_clean_nutrition(case: CleanerCase):
     assert case.expected == result
 
 
+@pytest.mark.parametrize("key", ["sodiumContent", "cholesterolContent"])
+@pytest.mark.parametrize("value", ["g", "trace g", "negligible", "", None, 10, ["10g"]])
+def test_clean_nutrition_skips_unparseable_nutrients(key: str, value: object) -> None:
+    assert cleaner.clean_nutrition({key: value, "proteinContent": "12 g"}) == {"proteinContent": "12"}
+
+
+@pytest.mark.parametrize("key", ["sodiumContent", "cholesterolContent"])
+@pytest.mark.parametrize("value, expected", [("0 g", "0.0"), ("0.5 g", "500.0"), ("0,5 g", "500.0")])
+def test_clean_nutrition_converts_nutrients_to_milligrams(key: str, value: str, expected: str) -> None:
+    assert cleaner.clean_nutrition({key: value}) == {key: expected}
+
+
+@pytest.mark.parametrize("key", ["sodiumContent", "cholesterolContent"])
+@pytest.mark.parametrize(
+    "value, expected",
+    [("0.5 grams", "500.0"), ("1 gram", "1000.0"), ("2 G", "2000.0"), ("1.5 gm", "1500.0")],
+)
+def test_clean_nutrition_converts_spelled_out_grams_to_milligrams(key: str, value: str, expected: str) -> None:
+    assert cleaner.clean_nutrition({key: value}) == {key: expected}
+
+
+@pytest.mark.parametrize("key", ["sodiumContent", "cholesterolContent"])
+@pytest.mark.parametrize(
+    "value, expected", [("500 mg", "500"), ("500 MG", "500"), ("500 milligrams", "500"), ("100 mcg", "100")]
+)
+def test_clean_nutrition_keeps_milligrams_and_smaller_units(key: str, value: str, expected: str) -> None:
+    assert cleaner.clean_nutrition({key: value}) == {key: expected}
+
+
+clean_notes_test_cases = (
+    CleanerCase(
+        test_id="valid dicts with title and text",
+        input=[
+            {"title": "Storage Tip", "text": "Keep refrigerated up to 3 days"},
+            {"title": "Variation", "text": "Add chili flakes for extra heat"},
+        ],
+        expected=[
+            {"title": "Storage Tip", "text": "Keep refrigerated up to 3 days"},
+            {"title": "Variation", "text": "Add chili flakes for extra heat"},
+        ],
+    ),
+    CleanerCase(
+        test_id="dict missing title gets empty title",
+        input=[{"text": "A note without a title"}],
+        expected=[{"title": "", "text": "A note without a title"}],
+    ),
+    CleanerCase(
+        test_id="dict missing text is skipped",
+        input=[{"title": "Only title, no text"}],
+        expected=[],
+    ),
+    CleanerCase(
+        test_id="plain string becomes note with empty title",
+        input=["A plain text note"],
+        expected=[{"title": "", "text": "A plain text note"}],
+    ),
+    CleanerCase(
+        test_id="mixed valid and invalid entries",
+        input=[
+            {"title": "Valid", "text": "Has both fields"},
+            {"title": "No text"},
+            "Plain string note",
+        ],
+        expected=[
+            {"title": "Valid", "text": "Has both fields"},
+            {"title": "", "text": "Plain string note"},
+        ],
+    ),
+    CleanerCase(
+        test_id="empty list",
+        input=[],
+        expected=[],
+    ),
+    CleanerCase(
+        test_id="non-list returns None",
+        input="not a list",
+        expected=None,
+    ),
+    CleanerCase(
+        test_id="none returns None",
+        input=None,
+        expected=None,
+    ),
+)
+
+
+@pytest.mark.parametrize("case", clean_notes_test_cases, ids=(x.test_id for x in clean_notes_test_cases))
+def test_cleaner_clean_notes(case: CleanerCase) -> None:
+    result = cleaner.clean_notes(case.input)
+    assert case.expected == result
+
+
 @pytest.mark.parametrize(
     "t,max_components,max_decimal_places,expected",
     [
-        (timedelta(days=2, seconds=17280), None, 2, "2 days 4 Hours 48 Minutes"),
+        (timedelta(days=2, seconds=17280), None, 2, "2 days 4 hours 48 minutes"),
         (timedelta(days=2, seconds=17280), 1, 2, "2.2 days"),
         (timedelta(days=365), None, 2, "1 year"),
     ],
 )
 def test_pretty_print_timedelta(t, max_components, max_decimal_places, expected):
-    assert cleaner.pretty_print_timedelta(t, max_components, max_decimal_places) == expected
+    translator = get_locale_provider()
+    assert cleaner.pretty_print_timedelta(t, translator, max_components, max_decimal_places) == expected

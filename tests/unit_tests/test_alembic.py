@@ -7,8 +7,8 @@ from tests.utils.alembic_reader import ALEMBIC_MIGRATIONS, import_file
 
 class AlembicMigration(BaseModel):
     path: pathlib.Path
-    revision: str | None
-    down_revision: str | None
+    revision: str | None = None
+    down_revision: str | None = None
 
 
 def test_alembic_revisions_are_in_order() -> None:
@@ -39,9 +39,9 @@ def test_alembic_revisions_are_in_order() -> None:
     last = None
     for migration in migrations:
         if last is not None:
-            assert (
-                last.revision == migration.down_revision
-            ), f"{last.revision} != {migration.down_revision} for {migration.path}"
+            assert last.revision == migration.down_revision, (
+                f"{last.revision} != {migration.down_revision} for {migration.path}"
+            )
 
         last = migration
         last = migration

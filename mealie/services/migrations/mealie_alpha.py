@@ -1,14 +1,14 @@
 import contextlib
 import shutil
 import tempfile
-import zipfile
 from pathlib import Path
 
 from mealie.schema.recipe.recipe import Recipe
+from mealie.schema.reports.reports import ReportEntryCreate
 
 from ._migration_base import BaseMigrator
 from .utils.migration_alias import MigrationAlias
-from .utils.migration_helpers import MigrationReaders, split_by_comma
+from .utils.migration_helpers import MigrationReaders, extract_zip, split_by_comma
 
 
 class MealieAlphaMigrator(BaseMigrator):
@@ -23,6 +23,18 @@ class MealieAlphaMigrator(BaseMigrator):
             MigrationAlias(key="recipeInstructions", alias="directions", func=None),
             MigrationAlias(key="tags", alias="tags", func=split_by_comma),
         ]
+
+    @classmethod
+    def get_zip_base_path(cls, path: Path) -> Path:
+        potential_path = super().get_zip_base_path(path)
+        if path == potential_path:
+            return path
+
+        # make sure we didn't accidentally open the "recipes" dir
+        if potential_path.name == "recipes":
+            return path
+        else:
+            return potential_path
 
     def _convert_to_new_schema(self, recipe: dict) -> Recipe:
         if recipe.get("categories", False):
@@ -39,7 +51,7 @@ class MealieAlphaMigrator(BaseMigrator):
         with contextlib.suppress(KeyError):
             if "" in recipe["categories"]:
                 recipe["categories"] = [cat for cat in recipe["categories"] if cat != ""]
-        if type(recipe["extras"]) == list:
+        if isinstance(recipe["extras"], list):
             recipe["extras"] = {}
 
         recipe["comments"] = []
@@ -51,24 +63,31 @@ class MealieAlphaMigrator(BaseMigrator):
 
     def _migrate(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            with zipfile.ZipFile(self.archive) as zip_file:
-                zip_file.extractall(tmpdir)
+            extract_zip(self.archive, tmpdir)
 
-            temp_path = Path(tmpdir)
-
+            temp_path = self.get_zip_base_path(Path(tmpdir))
             recipe_lookup: dict[str, Path] = {}
-            recipes_as_dicts = []
 
-            for x in temp_path.rglob("**/recipes/**/[!.]*.json"):
-                if (y := MigrationReaders.json(x)) is not None:
-                    recipes_as_dicts.append(y)
-                    slug = y["slug"]
-                    recipe_lookup[slug] = x.parent
-
-            recipes = [self._convert_to_new_schema(x) for x in recipes_as_dicts]
+            recipes: list[Recipe] = []
+            for recipe_json_path in temp_path.rglob("**/recipes/**/[!.]*.json"):
+                try:
+                    if (recipe_as_dict := MigrationReaders.json(recipe_json_path)) is not None:
+                        recipe = self._convert_to_new_schema(recipe_as_dict)
+                        recipes.append(recipe)
+                        slug = recipe_as_dict["slug"]
+                        recipe_lookup[slug] = recipe_json_path.parent
+                except Exception as e:
+                    self.logger.exception(e)
+                    self.report_entries.append(
+                        ReportEntryCreate(
+                            report_id=self.report_id,
+                            success=False,
+                            message=f"Failed to import {recipe_json_path.name}",
+                            exception=f"{e.__class__.__name__}: {e}",
+                        )
+                    )
 
             results = self.import_recipes_to_database(recipes)
-
             for slug, recipe_id, status in results:
                 if not status:
                     continue

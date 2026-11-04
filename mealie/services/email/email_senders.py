@@ -1,10 +1,61 @@
+import hmac
 import smtplib
 import typing
 from abc import ABC, abstractmethod
+from collections.abc import Buffer
 from dataclasses import dataclass
 from email import message
+from email.utils import formatdate
+from uuid import uuid4
+
+from html2text import html2text
 
 from mealie.services._base_service import BaseService
+
+SMTP_TIMEOUT = 10
+"""Timeout in seconds for SMTP connection"""
+
+
+class _UTF8AuthResponse(str):
+    """An AUTH response that encodes as UTF-8 whatever codec is asked for.
+
+    smtplib.SMTP.auth base64-encodes the auth_* helpers' return value with `.encode("ascii")`,
+    so a username or password containing non-ASCII characters (e.g. "€") raises a
+    UnicodeEncodeError before anything is sent to the server.
+    """
+
+    def encode(self, encoding: str = "utf-8", errors: str = "strict") -> bytes:
+        return super().encode("utf-8", errors)
+
+
+class UTF8AuthSMTP(smtplib.SMTP):
+    """
+    SMTP that sends its AUTH credentials as UTF-8 instead of ASCII. PLAIN is defined as UTF-8
+    (RFC 4616), and servers accept UTF-8 for LOGIN and CRAM-MD5 as well.
+    """
+
+    def auth_plain(self, challenge: Buffer | None = None) -> str:
+        return _UTF8AuthResponse(super().auth_plain(challenge))
+
+    def auth_login(self, challenge: Buffer | None = None) -> str:
+        return _UTF8AuthResponse(super().auth_login(challenge))
+
+    @typing.overload
+    def auth_cram_md5(self, challenge: None = None) -> None: ...
+    @typing.overload
+    def auth_cram_md5(self, challenge: Buffer) -> str: ...
+    def auth_cram_md5(self, challenge: Buffer | None = None) -> str | None:
+        # Reimplemented rather than wrapped: CRAM-MD5 hashes the password itself, and the stdlib
+        # keys the HMAC with `self.password.encode('ascii')`, which fails before we could wrap it.
+        if challenge is None:
+            # CRAM-MD5 does not support initial-response
+            return None
+        digest = hmac.HMAC(self.password.encode("utf-8"), challenge, "md5").hexdigest()
+        return _UTF8AuthResponse(f"{self.user} {digest}")
+
+
+class UTF8AuthSMTPSSL(smtplib.SMTP_SSL, UTF8AuthSMTP):
+    """SMTP_SSL with the UTF-8 AUTH handling of `UTF8AuthSMTP`"""
 
 
 @dataclass(slots=True)
@@ -36,16 +87,28 @@ class Message:
         msg["Subject"] = self.subject
         msg["From"] = f"{self.mail_from_name} <{self.mail_from_address}>"
         msg["To"] = to
+        msg["Date"] = formatdate(localtime=True)
+        msg.add_alternative(html2text(self.html), subtype="plain")
         msg.add_alternative(self.html, subtype="html")
 
+        try:
+            message_id = f"<{uuid4()}@{self.mail_from_address.split('@')[1]}>"
+        except IndexError:
+            # this should never happen with a valid email address,
+            # but we let the SMTP server handle it instead of raising it here
+            message_id = f"<{uuid4()}@{self.mail_from_address}>"
+
+        msg["Message-ID"] = message_id
+        msg["MIME-Version"] = "1.0"
+
         if smtp.ssl:
-            with smtplib.SMTP_SSL(smtp.host, smtp.port) as server:
+            with UTF8AuthSMTPSSL(smtp.host, smtp.port, timeout=SMTP_TIMEOUT) as server:
                 if smtp.username and smtp.password:
                     server.login(smtp.username, smtp.password)
 
                 errors = server.send_message(msg)
         else:
-            with smtplib.SMTP(smtp.host, smtp.port) as server:
+            with UTF8AuthSMTP(smtp.host, smtp.port, timeout=SMTP_TIMEOUT) as server:
                 if smtp.tls:
                     server.starttls()
                 if smtp.username and smtp.password:
@@ -57,8 +120,7 @@ class Message:
 
 class ABCEmailSender(ABC):
     @abstractmethod
-    def send(self, email_to: str, subject: str, html: str) -> bool:
-        ...
+    def send(self, email_to: str, subject: str, html: str) -> bool: ...
 
 
 class DefaultEmailSender(ABCEmailSender, BaseService):

@@ -1,23 +1,24 @@
 import datetime
 import enum
 
-from pydantic import Field
+from pydantic import ConfigDict, Field
 from pydantic.types import UUID4
 from sqlalchemy.orm import joinedload
 from sqlalchemy.orm.interfaces import LoaderOption
 
+from mealie.db.models._model_utils.datetime import get_utc_now
 from mealie.db.models.group import ReportModel
 from mealie.schema._mealie import MealieModel
 
 
-class ReportCategory(str, enum.Enum):
+class ReportCategory(enum.StrEnum):
     backup = "backup"
     restore = "restore"
     migration = "migration"
     bulk_import = "bulk_import"
 
 
-class ReportSummaryStatus(str, enum.Enum):
+class ReportSummaryStatus(enum.StrEnum):
     in_progress = "in-progress"
     success = "success"
     failure = "failure"
@@ -26,7 +27,7 @@ class ReportSummaryStatus(str, enum.Enum):
 
 class ReportEntryCreate(MealieModel):
     report_id: UUID4
-    timestamp: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
+    timestamp: datetime.datetime = Field(default_factory=get_utc_now)
     success: bool = True
     message: str
     exception: str = ""
@@ -34,13 +35,11 @@ class ReportEntryCreate(MealieModel):
 
 class ReportEntryOut(ReportEntryCreate):
     id: UUID4
-
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ReportCreate(MealieModel):
-    timestamp: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
+    timestamp: datetime.datetime = Field(default_factory=get_utc_now)
     category: ReportCategory
     group_id: UUID4
     name: str
@@ -53,9 +52,7 @@ class ReportSummary(ReportCreate):
 
 class ReportOut(ReportSummary):
     entries: list[ReportEntryOut] = []
-
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
     @classmethod
     def loader_options(cls) -> list[LoaderOption]:

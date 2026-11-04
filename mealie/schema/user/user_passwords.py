@@ -1,4 +1,4 @@
-from pydantic import UUID4
+from pydantic import UUID4, ConfigDict
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.interfaces import LoaderOption
 
@@ -33,14 +33,12 @@ class SavePasswordResetToken(MealieModel):
 
 class PrivatePasswordResetToken(SavePasswordResetToken):
     user: PrivateUser
-
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
     @classmethod
     def loader_options(cls) -> list[LoaderOption]:
         return [
             selectinload(PasswordResetModel.user).joinedload(User.group),
-            selectinload(PasswordResetModel.user).joinedload(User.favorite_recipes),
+            selectinload(PasswordResetModel.user).joinedload(User.household),
             selectinload(PasswordResetModel.user).joinedload(User.tokens),
         ]

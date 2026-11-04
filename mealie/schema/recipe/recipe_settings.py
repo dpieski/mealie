@@ -1,3 +1,5 @@
+from pydantic import ConfigDict
+
 from mealie.schema._mealie import MealieModel
 
 
@@ -7,8 +9,5 @@ class RecipeSettings(MealieModel):
     show_assets: bool = False
     landscape_view: bool = False
     disable_comments: bool = True
-    disable_amount: bool = True
     locked: bool = False
-
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)

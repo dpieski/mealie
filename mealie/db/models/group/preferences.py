@@ -1,15 +1,15 @@
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 import sqlalchemy.orm as orm
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .._model_base import BaseMixins, SqlAlchemyBase
-from .._model_utils import auto_init
+from .._model_utils.auto_init import auto_init
 from .._model_utils.guid import GUID
 
 if TYPE_CHECKING:
-    from group import Group
+    from .group import Group
 
 
 class GroupPreferencesModel(SqlAlchemyBase, BaseMixins):
@@ -17,12 +17,13 @@ class GroupPreferencesModel(SqlAlchemyBase, BaseMixins):
     id: Mapped[GUID] = mapped_column(GUID, primary_key=True, default=GUID.generate)
 
     group_id: Mapped[GUID | None] = mapped_column(GUID, sa.ForeignKey("groups.id"), nullable=False, index=True)
-    group: Mapped[Optional["Group"]] = orm.relationship("Group", back_populates="preferences")
+    group: Mapped[Group | None] = orm.relationship("Group", back_populates="preferences")
 
     private_group: Mapped[bool | None] = mapped_column(sa.Boolean, default=True)
-    first_day_of_week: Mapped[int | None] = mapped_column(sa.Integer, default=0)
+    show_announcements: Mapped[bool] = mapped_column(sa.Boolean, default=True)
 
-    # Recipe Defaults
+    # Deprecated (see household preferences)
+    first_day_of_week: Mapped[int | None] = mapped_column(sa.Integer, default=0)
     recipe_public: Mapped[bool | None] = mapped_column(sa.Boolean, default=True)
     recipe_show_nutrition: Mapped[bool | None] = mapped_column(sa.Boolean, default=False)
     recipe_show_assets: Mapped[bool | None] = mapped_column(sa.Boolean, default=False)

@@ -1,17 +1,19 @@
 .git
 .github
 .dockerignore
+.gitattributes
 .gitignore
 .idea
 .vscode
 
-__pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
 *.so
 htmlcov/
 .coverage
 .coverage.*
+.pylintrc
 .pytest_cache/
 .venv
 venv
@@ -23,8 +25,10 @@ venv
 
 */node_modules
 */dist
+/dist/
 */data/db
-*/mealie/test 
+*/mealie/test
 */mealie/.temp
+/mealie/frontend/
 
-model.crfmodel
+crowdin.yml

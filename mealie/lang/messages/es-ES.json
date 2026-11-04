@@ -3,10 +3,68 @@
         "server-error": "Se ha producido un error inesperado"
     },
     "recipe": {
-        "unique-name-error": "El nombre de la receta debe ser único"
+        "unique-name-error": "El nombre de la receta debe ser único",
+        "recipe-created": "Receta creada",
+        "made-this-as-side": "{name} hizo esto como segundo plato",
+        "made-this-for-breakfast": "{name} hizo esto para el desayuno",
+        "made-this-for-lunch": "{name} hizo esto para la comida principal",
+        "made-this-for-dinner": "{name} hizo esto para la cena",
+        "made-this-for-snack": "{name} hizo esto como tentempié",
+        "made-this-for-drink": "{name} hizo esto como bebida",
+        "made-this-for-dessert": "{name} hizo esto como postre",
+        "recipe-image-deleted": "Imagen de receta eliminada",
+        "recipe-defaults": {
+            "ingredient-note": "1 Taza de harina",
+            "name": "Nueva receta",
+            "step-text": "Los pasos de receta, así como otros campos en la página de recetas, soportan sintaxis Markdown.\n\n**Agregar un enlace**\n\n[Mi Enlace](https://demo.mealie.io)\n"
+        },
+        "servings-text": {
+            "makes": "Realizadas",
+            "serves": "Porciones",
+            "serving": "Porción",
+            "servings": "Porciones",
+            "yield": "Ración",
+            "yields": "Raciones"
+        },
+        "and-amount": "y {amount}",
+        "import-errors": {
+            "ai-not-enabled": "Los servicios de IA no están activado",
+            "ai-request-failed": "El proveedor de IA no pudo completar la solicitud. Por favor, inténtelo de nuevo",
+            "image-provider-not-enabled": "Los servicios de imágenes IA no están habilitados",
+            "invalid-mealie-export": "Parece una receta exportada desde Mealie, pero no se ha podido importar",
+            "no-recipe-found": "No se encontró ninguna receta en la fuente proporcionada",
+            "no-source": "No se proporcionaron contenidos, imágenes o URL",
+            "provider-returned-nothing": "El proveedor de IA no devolvió una receta",
+            "unknown-error": "Algo salió mal al crear la receta. Por favor, inténtalo de nuevo",
+            "unreadable-source": "No se puede leer ningún contenido desde la fuente proporcionada",
+            "video-download-failed": "No se puede descargar el vídeo. Puede ser privado, eliminado o de un sitio no soportado"
+        },
+        "create-progress": {
+            "creating-recipe": "Creando receta...",
+            "creating-recipe-from-transcript-with-ai": "Creando receta a partir de la transcripción con IA...",
+            "creating-recipe-from-webpage-data": "Creando receta a partir de datos de la página web...",
+            "downloading-image": "Descargando imagen...",
+            "downloading-video": "Descargando video...",
+            "extracting-recipe-data": "Extrayendo datos de la receta...",
+            "fetching-webpage": "Buscando página web...",
+            "organizing-recipe": "Organizando la receta...",
+            "reading-images-with-ai": "Leyendo imágenes con IA...",
+            "reading-source-with-ai": "Leyendo la fuente con IA...",
+            "transcribing-audio-with-ai": "Transcribiendo audio con IA...",
+            "translating-recipe": "Traduciendo la receta..."
+        }
     },
     "mealplan": {
-        "no-recipes-match-your-rules": "No hay recetas que coincidan con tus reglas"
+        "no-recipes-match-your-rules": "No hay recetas que coincidan con tus reglas",
+        "entry-type": {
+            "breakfast": "desayuno",
+            "lunch": "comida principal",
+            "dinner": "cena",
+            "side": "segundo plato",
+            "snack": "Tentempié",
+            "drink": "bebida",
+            "dessert": "postre"
+        }
     },
     "user": {
         "user-updated": "Usuario actualizado",
@@ -18,8 +76,10 @@
         "report-deleted": "El informe fue eliminado."
     },
     "exceptions": {
-        "permission_denied": "No tiene permiso para realizar esta acción",
+        "permission-denied": "No tiene permiso para realizar esta acción",
+        "recursive-recipe-link": "Una receta no puede referenciarse, sea directa o indirectamente",
         "no-entry-found": "No se ha encontrado el recurso solicitado",
+        "rate-limit-error": "El proveedor de IA está limitando las solicitudes. Por favor, espere un momento y vuelva a intentarlo",
         "integrity-error": "Error de integridad de la base de Datos",
         "username-conflict-error": "Este nombre de usuario ya está en uso",
         "email-conflict-error": "Este correo electrónico ya está en uso"
@@ -30,6 +90,75 @@
         "generic-created-with-url": "Se ha creado {name}, {url}",
         "generic-updated-with-url": "Se ha actualizado {name}, {url}",
         "generic-duplicated": "Se ha duplicado {name}",
-        "generic-deleted": "Se ha eliminado {name}"
+        "generic-deleted": "Se ha eliminado {name}",
+        "logged-out": "Desconectado",
+        "event-title": {
+            "test-message": "Mensaje de prueba",
+            "webhook-task": "Tarea de webhook",
+            "recipe-created": "Receta creada",
+            "recipe-updated": "Receta actualizada",
+            "recipe-deleted": "Receta eliminada",
+            "user-signup": "Registro de usuario",
+            "data-migrations": "Migraciones de datos",
+            "data-export": "Exportación de datos",
+            "data-import": "Importación de datos",
+            "mealplan-entry-created": "Entrada del plan de comidas creada",
+            "mealplan-entry-updated": "Entrada del plan de comidas actualizada",
+            "mealplan-entry-deleted": "Entrada del plan de comidas eliminada",
+            "shopping-list-created": "Lista de la compra creada",
+            "shopping-list-updated": "Lista de la compra actualizada",
+            "shopping-list-deleted": "Lista de la compra eliminada",
+            "cookbook-created": "Recetario creado",
+            "cookbook-updated": "Recetario actualizado",
+            "cookbook-deleted": "Recetario eliminado",
+            "tag-created": "Etiqueta creada",
+            "tag-updated": "Etiqueta actualizada",
+            "tag-deleted": "Etiqueta eliminada",
+            "category-created": "Categoría creada",
+            "category-updated": "Categoría actualizada",
+            "category-deleted": "Categoría eliminada",
+            "label-created": "Etiqueta creada",
+            "label-updated": "Etiqueta actualizada",
+            "label-deleted": "Etiqueta eliminada"
+        },
+        "test-message-body": "Esta es una notificación de prueba de Mealie.",
+        "mealplan-entry-created": "Entrada del plan de comidas creada para el {date} ({entry_type})",
+        "mealplan-entry-updated": "Entrada del plan de comidas actualizada para el {date} ({entry_type})",
+        "mealplan-entry-deleted": "Entrada del plan de comidas eliminada para el {date} ({entry_type})",
+        "mealplan-range-entry-created": "Entrada del plan de comidas creada del {date} al {end_date} ({entry_type})",
+        "mealplan-range-entry-updated": "Entrada del plan de comidas actualizada del {date} al {end_date} ({entry_type})",
+        "mealplan-range-entry-deleted": "Entrada del plan de comidas eliminada del {date} al {end_date} ({entry_type})"
+    },
+    "datetime": {
+        "year": "año|años",
+        "day": "día|días",
+        "hour": "hora|horas",
+        "minute": "minuto|minutos",
+        "second": "segundo|segundos",
+        "millisecond": "milisegundo|milisegundos",
+        "microsecond": "microsegundo|microsegundos"
+    },
+    "emails": {
+        "password": {
+            "subject": "Mealie Olvidó la contraseña",
+            "header_text": "Olvidé mi contraseña",
+            "message_top": "Has solicitado restablecer tu contraseña.",
+            "message_bottom": "Por favor, haz click en el botón de arriba para reestablecer tu contraseña.",
+            "button_text": "Restablecer contraseña"
+        },
+        "invitation": {
+            "subject": "Invitación para unirse a Mealie",
+            "header_text": "¡Estás invitado!",
+            "message_top": "Has sido invitado a unirte a Mealie.",
+            "message_bottom": "Por favor, haga clic en el botón de arriba para aceptar la invitación.",
+            "button_text": "Aceptar invitación"
+        },
+        "test": {
+            "subject": "Mealie Correo de prueba",
+            "header_text": "Correo de prueba",
+            "message_top": "Este es un correo de prueba.",
+            "message_bottom": "Por favor, haz clic en el botón de arriba para probar el correo.",
+            "button_text": "Abrir Mealie"
+        }
     }
 }

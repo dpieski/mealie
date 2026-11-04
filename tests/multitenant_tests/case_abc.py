@@ -13,22 +13,18 @@ class ABCMultiTenantTestCase(ABC):
         self.items: list = []
 
     @abstractmethod
-    def seed_action(self, group_id: str) -> set[int] | set[str]:
-        ...
+    def seed_action(self, group_id: str) -> set[int] | set[str]: ...
 
     @abstractmethod
-    def seed_multi(self, group1_id: str, group2_id: str) -> tuple[set[str], set[str]]:
-        ...
+    def seed_multi(self, group1_id: str, group2_id: str) -> tuple[set[str], set[str]]: ...
 
     @abstractmethod
-    def get_all(self, token: str) -> Response:
-        ...
+    def get_all(self, token: str) -> Response: ...
 
     @abstractmethod
-    def cleanup(self) -> None:
-        ...
+    def cleanup(self) -> None: ...
 
-    def __enter__(self):
+    def __enter__(self):  # noqa: B027
         pass
 
     def __exit__(self, exc_type, exc_val, exc_tb):

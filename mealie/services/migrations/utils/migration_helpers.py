@@ -1,10 +1,12 @@
 import json
+import zipfile
 from pathlib import Path
 
 import yaml
 from PIL import UnidentifiedImageError
 from pydantic import UUID4
 
+from mealie.core import root_logger
 from mealie.services.recipe.recipe_data_service import RecipeDataService
 
 
@@ -43,6 +45,35 @@ class MigrationReaders:
         return recipe_data
 
 
+MAX_EXTRACTED_ARCHIVE_SIZE = 5 * 1024**3
+"""Upper bound, in bytes, on what a single migration may unpack, nested archives included"""
+
+
+class ArchiveTooLargeError(ValueError):
+    pass
+
+
+def extract_zip(archive: Path, dest: str | Path, max_size: int | None = None) -> int:
+    """Extracts `archive` into `dest` and returns the number of bytes written.
+
+    Raises ArchiveTooLargeError, before writing anything, when the archive would unpack to more
+    than `max_size` bytes. The declared member sizes can be trusted for this: zipfile stops reading
+    each member at its declared size. Callers that unpack nested archives pass what is left of
+    the budget as `max_size`, so a zip of zips cannot multiply the limit.
+    """
+    if max_size is None:
+        max_size = MAX_EXTRACTED_ARCHIVE_SIZE
+
+    with zipfile.ZipFile(archive) as zip_file:
+        total = sum(info.file_size for info in zip_file.infolist())
+        if total > max_size:
+            raise ArchiveTooLargeError(f"Archive unpacks to {total} bytes, over the {max_size} byte limit")
+
+        zip_file.extractall(dest)
+
+    return total
+
+
 def split_by_comma(tag_string: str):
     """Splits a single string by ',' performs a line strip and then title cases the resulting string
 
@@ -55,6 +86,21 @@ def split_by_comma(tag_string: str):
     if not isinstance(tag_string, str):
         return None
     return [x.title().lstrip() for x in tag_string.split(",") if x != ""]
+
+
+def split_by_semicolon(input: str):
+    """Splits a single string by ';', performs a line strip removes empty strings"""
+
+    if not isinstance(input, str):
+        return None
+    return [x.strip() for x in input.split(";") if x]
+
+
+def split_by_line_break(input: str):
+    """Splits a single string by line break, performs a line strip removes empty strings"""
+    if not isinstance(input, str):
+        return None
+    return [x.strip() for x in input.split("\n") if x]
 
 
 def glob_walker(directory: Path, glob_str: str, return_parent=True) -> list[Path]:  # TODO:
@@ -82,21 +128,70 @@ def glob_walker(directory: Path, glob_str: str, return_parent=True) -> list[Path
     return matches
 
 
-def import_image(src: str | Path, recipe_id: UUID4):
-    """Read the successful migrations attribute and for each import the image
-    appropriately into the image directory. Minification is done in mass
-    after the migration occurs.
+def safe_local_path(candidate: str | Path, root: Path) -> Path | None:
+    """
+    Returns the resolved path only if it is safely contained within root.
+
+    Returns ``None`` for any path that would escape the root directory,
+    including ``../../`` traversal sequences and absolute paths outside root.
+    Symlinks are followed by ``resolve()``, so a symlink pointing outside root
+    is also rejected.
+    """
+    try:
+        # OSError: symlink resolution failure; ValueError: null bytes on some platforms
+        resolved = Path(candidate).resolve()
+        if resolved.is_relative_to(root.resolve()):
+            return resolved
+    except OSError, ValueError:
+        pass
+    return None
+
+
+def import_image(src: str | Path, recipe_id: UUID4, extraction_root: Path | None = None) -> Path | None:
+    """Import a local image file into the recipe image directory.
+
+    Returns the path the image was written to, or `None` if there was nothing to import.
+
+    May raise an UnidentifiedImageError if the file is not a recognised format.
+
+    If extraction_root is provided, the src path must be contained within it.
+    Paths that escape the extraction_root are silently rejected to prevent
+    arbitrary local file reads via archive-controlled image paths.
     """
 
     if isinstance(src, str):
         src = Path(src)
 
+    if extraction_root is not None:
+        safe_src = safe_local_path(src, extraction_root)
+        if safe_src is None:
+            root_logger.get_logger().warning(
+                "Rejected image path outside extraction root: %s (root: %s)", src, extraction_root
+            )
+            return None
+        src = safe_src
+
     if not src.exists():
-        return
+        return None
+
+    data_service = RecipeDataService(recipe_id=recipe_id)
+    return data_service.write_image(src.read_bytes(), src.suffix)
+
+
+async def scrape_image(image_url: str, recipe_id: UUID4) -> Path | None:
+    """Read the successful migrations attribute and for each scrape the image
+    appropriately into the image directory. Minification is done in mass
+    after the migration occurs.
+
+    Returns the path the image was written to, or `None` if nothing was downloaded.
+    """
+
+    if not isinstance(image_url, str):
+        return None
 
     data_service = RecipeDataService(recipe_id=recipe_id)
 
     try:
-        data_service.write_image(src, src.suffix)
+        return await data_service.scrape_image(image_url)
     except UnidentifiedImageError:
-        return
+        return None

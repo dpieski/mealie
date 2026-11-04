@@ -2,20 +2,33 @@ import contextlib
 import functools
 import html
 import json
-import operator
+import numbers
 import re
 import typing
 from datetime import datetime, timedelta
 
+import isodate
 from slugify import slugify
+
+from mealie.core.root_logger import get_logger
+from mealie.lang.providers import Translator, get_all_translations
+from mealie.schema.recipe.recipe import MAX_DURATION_SECONDS, Recipe
+from mealie.services.parser_services.parser_utils import extract_quantity_from_string
+
+logger = get_logger("recipe-scraper")
+
+NO_IMAGE = "no image"
+"""Placeholder stored on a recipe that has no image. Not a URL, and must never be fetched."""
+
+
+MATCH_NUMBER = re.compile(r"\d+(?:\.\d+)?")
+""" A bare number, e.g. `30` or `1.5` """
 
 MATCH_DIGITS = re.compile(r"\d+([.,]\d+)?")
 """ Allow for commas as decimals (common in Europe) """
 
-MATCH_ISO_STR = re.compile(
-    r"^P((\d+)Y)?((\d+)M)?((?P<days>\d+)D)?" r"T((?P<hours>\d+)H)?((?P<minutes>\d+)M)?((?P<seconds>\d+(?:\.\d+)?)S)?$",
-)
-""" Match Duration Strings """
+MATCH_GRAMS = re.compile(r"\d\s*(?:g|gm|gr|grams?)\b", re.IGNORECASE)
+""" A quantity in grams, e.g. `0.5 g`, `10g` or `2 grams`, but not `500 mg` """
 
 MATCH_HTML_TAGS = re.compile(r"<[^<]+?>")
 """ Matches HTML tags `<p>Text</p>` -> `Text` """
@@ -27,42 +40,65 @@ MATCH_ERRONEOUS_WHITE_SPACE = re.compile(r"\n\s*\n")
 """ Matches multiple new lines and removes erroneous white space """
 
 
-def clean(recipe_data: dict, url=None) -> dict:
+def clean(recipe_data: Recipe | dict, translator: Translator, url=None) -> Recipe:
     """Main entrypoint to clean a recipe extracted from the web
     and format the data into an accectable format for the database
 
     Args:
-        recipe_data (dict): raw recipe dicitonary
+        recipe_data (dict): raw recipe or recipe dictionary
 
     Returns:
         dict: cleaned recipe dictionary
     """
+    if not isinstance(recipe_data, dict):
+        # format the recipe like a scraped dictionary. Ingredients are flattened to their display
+        # text, but keep their section titles, which are otherwise lost on the way through
+        recipe_data_dict = recipe_data.model_dump(by_alias=True)
+        recipe_data_dict["recipeIngredient"] = [
+            {"title": ing.title, "note": ing.display} if ing.title else {"note": ing.display}
+            for ing in recipe_data.recipe_ingredient
+        ]
+
+        recipe_data = recipe_data_dict
+
+    recipe_data["slug"] = slugify(recipe_data.get("name", ""))
     recipe_data["description"] = clean_string(recipe_data.get("description", ""))
 
-    # Times
-    recipe_data["prepTime"] = clean_time(recipe_data.get("prepTime"))
-    recipe_data["performTime"] = clean_time(recipe_data.get("performTime"))
-    recipe_data["totalTime"] = clean_time(recipe_data.get("totalTime"))
+    for time_key in ("prepTime", "performTime", "totalTime"):
+        seconds_key = f"{time_key}Seconds"
+        seconds = clean_duration(recipe_data.get(time_key)) if recipe_data.get(seconds_key) is None else None
+        if seconds is not None:
+            recipe_data[seconds_key] = seconds
+            recipe_data[time_key] = None
+        else:
+            recipe_data[time_key] = clean_time(recipe_data.get(time_key), translator)
+
+    recipe_data["recipeServings"], recipe_data["recipeYieldQuantity"], recipe_data["recipeYield"] = clean_yield(
+        recipe_data.get("recipeYield")
+    )
     recipe_data["recipeCategory"] = clean_categories(recipe_data.get("recipeCategory", []))
-    recipe_data["recipeYield"] = clean_yield(recipe_data.get("recipeYield"))
     recipe_data["recipeIngredient"] = clean_ingredients(recipe_data.get("recipeIngredient", []))
     recipe_data["recipeInstructions"] = clean_instructions(recipe_data.get("recipeInstructions", []))
+
     recipe_data["image"] = clean_image(recipe_data.get("image"))[0]
-    recipe_data["slug"] = slugify(recipe_data.get("name", ""))
     recipe_data["orgURL"] = url or recipe_data.get("orgURL")
     recipe_data["notes"] = clean_notes(recipe_data.get("notes"))
     recipe_data["rating"] = clean_int(recipe_data.get("rating"))
 
-    return recipe_data
+    return Recipe(**recipe_data)
 
 
-def clean_string(text: str | list | int) -> str:
+def clean_string(text: str | list | int | float) -> str:
     """Cleans a string of HTML tags and extra white space"""
     if not isinstance(text, str):
         if isinstance(text, list):
-            text = text[0]
-
-        if isinstance(text, int):
+            if text:
+                return clean_string(text[0])
+            else:
+                text = ""
+        elif text is None:
+            text = ""
+        else:
             text = str(text)
 
     if not text:
@@ -79,15 +115,15 @@ def clean_string(text: str | list | int) -> str:
     return cleaned_text
 
 
-def clean_image(image: str | list | dict | None = None, default: str = "no image") -> list[str]:
+def clean_image(image: str | list | dict | None = None, default: str = NO_IMAGE) -> list[str]:
     """
     image attempts to parse the image field from a recipe and return a string. Currenty
 
     Supported Structures:
-        - `https://exmaple.com` - A string
-        - `{ "url": "https://exmaple.com" }` - A dictionary with a `url` key
-        - `["https://exmaple.com"]` - A list of strings
-        - `[{ "url": "https://exmaple.com" }]` - A list of dictionaries with a `url` key
+        - `https://example.com` - A string
+        - `{ "url": "https://example.com" }` - A dictionary with a `url` key
+        - `["https://example.com"]` - A list of strings
+        - `[{ "url": "https://example.com" }]` - A list of dictionaries with a `url` key
 
     Raises:
         TypeError: If the image field is not a supported type a TypeError is raised.
@@ -102,13 +138,54 @@ def clean_image(image: str | list | dict | None = None, default: str = "no image
         case str(image):
             return [image]
         case [str(_), *_]:
-            return image
+            # Only return non-null strings in list
+            return [x for x in image if x]
         case [{"url": str(_)}, *_]:
-            return [x["url"] for x in image]
+            return [x["url"] for x in image if "url" in x]
         case {"url": str(image)}:
             return [image]
+        case [{"@id": str(_)}, *_]:
+            return [x["@id"] for x in image if "@id" in x]
         case _:
-            raise TypeError(f"Unexpected type for image: {type(image)}, {image}")
+            logger.exception(f"Unexpected type for image: {type(image)}, {image}")
+            return [default]
+
+
+def is_how_to_section(entry: typing.Any) -> bool:
+    """schema.org groups steps with `@type: HowToSection`; some sites spell the key `type`."""
+    return isinstance(entry, dict) and "HowToSection" in (entry.get("@type"), entry.get("type"))
+
+
+def _step_heading(instruction: dict) -> str:
+    """Return the step's own heading, which Mealie stores as `summary`.
+
+    schema.org calls it `HowToStep.name`, but sites routinely fill that with a copy of the
+    text, or with the text truncated, so a name the text already opens with is dropped
+    rather than shown twice. This is the rule recipe_scrapers applies to the same field.
+    """
+    if summary := instruction.get("summary"):
+        return clean_string(summary)
+
+    name = instruction.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return ""
+
+    # compare the cleaned forms: a name carrying HTML entities would otherwise sail past
+    # the check against text that has already had them decoded
+    heading = clean_string(name).strip()
+    if not heading:
+        return ""
+
+    # sites also truncate the text into the name (yummly's "Step 1: Preheat oven to 425…"),
+    # and a heading cut off mid word is worse than no heading at all
+    if heading.endswith(("...", "\u2026")):
+        return ""
+
+    text = clean_string(instruction.get("text") or "")
+    if text.casefold().startswith(heading.rstrip(". \u2026").casefold()):
+        return ""
+
+    return heading
 
 
 def clean_instructions(steps_object: list | dict | str, default: list | None = None) -> list[dict]:
@@ -120,14 +197,50 @@ def clean_instructions(steps_object: list | dict | str, default: list | None = N
         TypeError: If the instructions field is not a supported type a TypeError is raised.
 
     Returns:
-        list[dict]: An ordered list of dictionaries with the keys `text`
+        list[dict]: An ordered list of dictionaries with the key `text`, plus `title` on the
+        first step of a named HowToSection, which is where Mealie stores a section heading
     """
     if not steps_object:
         return default or []
 
     match steps_object:
-        case [{"text": str()}]:  # Base Case
-            return steps_object
+        case [*_] if any(is_how_to_section(step) for step in steps_object):
+            # HowToSections should have the following layout,
+            # {
+            #  "@type": "HowToSection",
+            #  "name": "Section A",
+            #  "itemListElement": [
+            #    {
+            #      "@type": "HowToStep",
+            #      "text": "Instruction A"
+            #    },
+            # }
+            #
+            # Some sites (e.g. NYT Cooking) emit empty HowToSection placeholders
+            # with no itemListElement key, or use "item" per the schema.org spec.
+            # Use .get() with both fallbacks so those sections are skipped gracefully.
+            steps_object = typing.cast(list, steps_object)
+
+            instructions: list[dict] = []
+            for entry in steps_object:
+                if not is_how_to_section(entry):
+                    # a recipe can open with a few loose steps and only then start
+                    # grouping them, so both kinds share the one list
+                    instructions.extend(clean_instructions([entry]))
+                    continue
+
+                section_steps = clean_instructions(entry.get("itemListElement", entry.get("item", [])))
+                if not section_steps:
+                    continue
+
+                # a section heading lives on the first step of the section (RecipeStep.title),
+                # which is how the frontend groups the steps that follow it
+                if section_title := clean_string(entry.get("name") or entry.get("Name") or ""):
+                    section_steps = [section_steps[0] | {"title": section_title}, *section_steps[1:]]
+
+                instructions.extend(section_steps)
+
+            return instructions
         case [{"text": str()}, *_]:
             # The is the most common case. Most other operations eventually resolve to this
             # match case before being converted to a list of instructions
@@ -139,9 +252,20 @@ def clean_instructions(steps_object: list | dict | str, default: list | None = N
             #
             return [
                 {"text": _sanitize_instruction_text(instruction["text"])}
+                | ({"title": instruction["title"]} if instruction.get("title") else {})
+                | ({"summary": heading} if (heading := _step_heading(instruction)) else {})
                 for instruction in steps_object
-                if instruction["text"].strip()
+                if "text" in instruction and instruction["text"].strip()
             ]
+        case {"text": str()}:
+            # A single step is sometimes passed as a bare dict rather than a list of one
+            #
+            # {"@type": "HowToStep", "text": "Instruction A"}
+            #
+            return clean_instructions([steps_object])
+        case {"@type": "HowToSection"} | {"type": "HowToSection"}:
+            # Likewise, a recipe with only one section may pass that section on its own
+            return clean_instructions([steps_object])
         case {0: {"text": str()}} | {"0": {"text": str()}} | {1: {"text": str()}} | {"1": {"text": str()}}:
             # Some recipes have a dict with a string key representing the index, unsure if these can
             # be an int or not so we match against both. Additionally, we match against both 0 and 1 indexed
@@ -153,7 +277,7 @@ def clean_instructions(steps_object: list | dict | str, default: list | None = N
             # }
             #
             steps_object = typing.cast(dict, steps_object)
-            return clean_instructions([x for x in steps_object.values()])
+            return clean_instructions(list(steps_object.values()))
         case str(step_as_str):
             # Strings are weird, some sites return a single string with newlines
             # others returns a json string for some reasons
@@ -182,25 +306,6 @@ def clean_instructions(steps_object: list | dict | str, default: list | None = N
             return [
                 {"text": _sanitize_instruction_text(instruction)} for instruction in steps_object if instruction.strip()
             ]
-        case [{"@type": "HowToSection"}, *_] | [{"type": "HowToSection"}, *_]:
-            # HowToSections should have the following layout,
-            # {
-            #  "@type": "HowToSection",
-            #  "itemListElement": [
-            #    {
-            #      "@type": "HowToStep",
-            #      "text": "Instruction A"
-            #    },
-            # }
-            #
-            steps_object = typing.cast(list[dict[str, str]], steps_object)
-            return clean_instructions(
-                functools.reduce(
-                    operator.concat,  # type: ignore
-                    [x["itemListElement"] for x in steps_object],
-                    [],
-                )
-            )
         case _:
             raise TypeError(f"Unexpected type for instructions: {type(steps_object)}, {steps_object}")
 
@@ -234,12 +339,27 @@ def _sanitize_instruction_text(line: str | dict) -> str:
     return clean_line
 
 
+def unwrap_text_node(value: typing.Any) -> typing.Any:
+    """
+    schema.org permits any Text subtype wherever a plain string is expected, so an
+    ingredient may arrive as `{"@type": "PronounceableText", "textValue": "1 cup flour"}`
+    rather than `"1 cup flour"`. Instacart emits these. Returns the inner string when the
+    value is such a wrapper, otherwise returns it untouched.
+    """
+    if isinstance(value, dict) and "textValue" in value:
+        text = value.get("textValue")
+        if isinstance(text, str):
+            return text
+    return value
+
+
 def clean_ingredients(ingredients: list | str | None, default: list | None = None) -> list[str | dict]:
     """
     ingredient attempts to parse the ingredients field from a recipe and return a list of
 
     Supported Structures:
         - `["1 cup flour"]` - A list of strings
+        - `[{"@type": "PronounceableText", "textValue": "1 cup flour"}]` - schema.org Text nodes
         - `"1 cup flour"` - A string
         - `None` - returns an empty list
 
@@ -252,6 +372,7 @@ def clean_ingredients(ingredients: list | str | None, default: list | None = Non
         case list(ingredients):
             cleaned_ingredients: list[str | dict] = []
             for ing in ingredients:
+                ing = unwrap_text_node(ing)
                 if isinstance(ing, dict):
                     cleaned_ingredients.append({clean_string(k): clean_string(v) for k, v in ing.items()})
                 else:
@@ -260,7 +381,7 @@ def clean_ingredients(ingredients: list | str | None, default: list | None = Non
         case [str()]:
             return [clean_string(ingredient) for ingredient in ingredients]
         case str(ingredients):
-            return [clean_string(ingredient) for ingredient in ingredients.splitlines()]
+            return [clean_string(ingredient) for ingredient in ingredients.splitlines() if ingredient.strip()]
         case _:
             raise TypeError(f"Unexpected type for ingredients: {type(ingredients)}, {ingredients}")
 
@@ -307,7 +428,31 @@ def clean_notes(notes: typing.Any) -> list[dict] | None:
     return parsed_notes
 
 
-def clean_yield(yld: str | list[str] | None) -> str:
+@functools.lru_cache
+def _get_servings_options() -> set[str]:
+    options: set[str] = set()
+    for key in [
+        "recipe.servings-text.makes",
+        "recipe.servings-text.serves",
+        "recipe.servings-text.serving",
+        "recipe.servings-text.servings",
+        "recipe.servings-text.yield",
+        "recipe.servings-text.yields",
+    ]:
+        options.update([t.strip().lower() for t in get_all_translations(key).values()])
+
+    return options
+
+
+def _is_serving_string(txt: str) -> bool:
+    txt = txt.strip().lower()
+    for option in _get_servings_options():
+        if option in txt.strip().lower():
+            return True
+    return False
+
+
+def clean_yield(yields: str | list[str] | None) -> tuple[float, float, str]:
     """
     yield_amount attemps to parse out the yield amount from a recipe.
 
@@ -316,25 +461,87 @@ def clean_yield(yld: str | list[str] | None) -> str:
         - `["4 servings", "4 Pies"]` - returns the last value
 
     Returns:
+        float: The servings, if it can be parsed else 0
+        float: The yield quantity, if it can be parsed else 0
         str: The yield amount, if it can be parsed else an empty string
     """
-    if not yld:
-        return ""
+    servings_qty: float = 0
+    yld_qty: float = 0
+    yld_str = ""
 
-    if isinstance(yld, list):
-        return yld[-1]
+    if not yields:
+        return servings_qty, yld_qty, yld_str
 
-    return yld
+    if not isinstance(yields, list):
+        yields = [yields]
+
+    for yld in yields:
+        if not yld:
+            continue
+        if not isinstance(yld, str):
+            yld = str(yld)
+
+        qty, txt = extract_quantity_from_string(yld)
+        if qty and _is_serving_string(yld):
+            servings_qty = qty
+        else:
+            yld_qty = qty
+            yld_str = txt
+
+    return servings_qty, yld_qty, yld_str
 
 
-def clean_time(time_entry: str | timedelta | None) -> None | str:
+def clean_duration(time_entry: typing.Any) -> int | None:
+    """
+    The duration in seconds, when `time_entry` is structured. Anything else returns None,
+    and should be kept as text with `clean_time`.
+
+    Supported Structures:
+        - `"PT1H30M"` - returns 5400
+        - `30` or `"30"` - assumed to be in minutes, returns 1800
+        - `timedelta(hours=1)` - returns 3600
+        - `{"minValue": "PT1H"}` or `["PT1H", ...]` - the first value, returns 3600
+
+    Durations that aren't positive, or don't fit in the database, return None.
+    """
+    match time_entry:
+        case bool():
+            return None
+        case numbers.Number():
+            seconds = float(time_entry) * 60  # type: ignore
+        case str():
+            value = time_entry.strip()
+            if MATCH_NUMBER.fullmatch(value):
+                seconds = float(value) * 60
+            elif (delta := parse_duration(value)) is not None:
+                seconds = delta.total_seconds()
+            else:
+                return None
+        case timedelta():
+            seconds = time_entry.total_seconds()
+        case {"minValue": value}:
+            return clean_duration(value)
+        case [first, *_]:
+            return clean_duration(first)
+        case _:
+            return None
+
+    if not 0 < seconds <= MAX_DURATION_SECONDS:
+        return None
+    return round(seconds) or None
+
+
+def clean_time(time_entry: str | timedelta | int | float | None, translator: Translator) -> None | str:
     """_summary_
 
     Supported Structures:
         - `None` - returns None
         - `"PT1H"` - returns "1 hour"
         - `"PT1H30M"` - returns "1 hour 30 minutes"
+        - `"P1D"` - returns "1 day"
         - `timedelta(hours=1, minutes=30)` - returns "1 hour 30 minutes"
+        - `{"minValue": "PT1H30M"}` - returns "1 hour 30 minutes"
+        - `30` - as a `int` or `float` assumed to be in minutes, returns "30 minutes"
 
     Raises:
         TypeError: if the type is not supported a TypeError is raised
@@ -346,73 +553,68 @@ def clean_time(time_entry: str | timedelta | None) -> None | str:
         return None
 
     match time_entry:
+        case numbers.Number():
+            # type checked by case statement
+            return clean_time(timedelta(minutes=time_entry), translator)  # type: ignore
         case str(time_entry):
             if not time_entry.strip():
                 return None
 
-            try:
-                time_delta_instructionsect = parse_duration(time_entry)
-                return pretty_print_timedelta(time_delta_instructionsect)
-            except ValueError:
+            # Anything that isn't a duration, or is a negative one, is kept as text
+            delta = parse_duration(time_entry)
+            if delta is None or delta < timedelta(0):
                 return str(time_entry)
+            return clean_time(timedelta(seconds=int(delta.total_seconds())), translator)
         case timedelta():
-            return pretty_print_timedelta(time_entry)
+            # A zero or negative duration isn't a time worth showing
+            return pretty_print_timedelta(time_entry, translator) if time_entry > timedelta(0) else None
+        case {"minValue": str(value)}:
+            return clean_time(value, translator)
+        case [str(), *_]:
+            return clean_time(time_entry[0], translator)
         case datetime():
             # TODO: Not sure what to do here
             return str(time_entry)
         case _:
-            raise TypeError(f"Unexpected type for time: {type(time_entry)}, {time_entry}")
+            logger.warning(
+                "[SCRAPER] Unexpected type(%s) or structure for variable time_entry: %s", type(time_entry), time_entry
+            )
+            return None
 
 
-def parse_duration(iso_duration: str) -> timedelta:
+def parse_duration(value: str) -> timedelta | None:
     """
-    Parses an ISO 8601 duration string into a datetime.timedelta instance.
+    Parses an ISO 8601 duration string, e.g. `"PT1H30M"`, into a timedelta.
 
-    Args:
-        iso_duration: an ISO 8601 duration string.
-
-    Raises:
-        ValueError: if the input string is not a valid ISO 8601 duration string.
+    Returns None if it isn't one, or if it has years or months, which have no fixed length.
     """
+    try:
+        delta = isodate.parse_duration(value.strip().upper())
+    except isodate.ISO8601Error, ValueError:
+        return None
 
-    m = MATCH_ISO_STR.match(iso_duration)
-
-    if m is None:
-        raise ValueError("invalid ISO 8601 duration string")
-
-    # Years and months are not being utilized here, as there is not enough
-    # information provided to determine which year and which month.
-    # Python's time_delta class stores durations as days, seconds and
-    # microseconds internally, and therefore we'd have to
-    # convert parsed years and months to specific number of days.
-
-    times = {"days": 0, "hours": 0, "minutes": 0, "seconds": 0}
-    for unit in times.keys():
-        if m.group(unit):
-            times[unit] = int(float(m.group(unit)))
-
-    return timedelta(**times)
+    return delta if isinstance(delta, timedelta) else None
 
 
-def pretty_print_timedelta(t: timedelta, max_components=None, max_decimal_places=2):
+def pretty_print_timedelta(t: timedelta, translator: Translator, max_components=None, max_decimal_places=2):
     """
     Print a pretty string for a timedelta.
     For example datetime.timedelta(days=2, seconds=17280) will be printed as '2 days 4 Hours 48 Minutes'.
     Setting max_components to e.g. 1 will change this to '2.2 days', where the number of decimal
     points can also be set.
     """
-    time_scale_names_dict = {
-        timedelta(days=365): "year",
-        timedelta(days=1): "day",
-        timedelta(hours=1): "Hour",
-        timedelta(minutes=1): "Minute",
-        timedelta(seconds=1): "Second",
-        timedelta(microseconds=1000): "millisecond",
-        timedelta(microseconds=1): "microsecond",
+    time_scale_translation_keys_dict = {
+        timedelta(days=365): "datetime.year",
+        timedelta(days=1): "datetime.day",
+        timedelta(hours=1): "datetime.hour",
+        timedelta(minutes=1): "datetime.minute",
+        timedelta(seconds=1): "datetime.second",
+        timedelta(microseconds=1000): "datetime.millisecond",
+        timedelta(microseconds=1): "datetime.microsecond",
     }
     count = 0
     out_list = []
-    for scale, scale_name in time_scale_names_dict.items():
+    for scale, scale_translation_key in time_scale_translation_keys_dict.items():
         if t >= scale:
             count += 1
             n = t / scale if count == max_components else int(t / scale)
@@ -422,7 +624,8 @@ def pretty_print_timedelta(t: timedelta, max_components=None, max_decimal_places
             if n_txt[-2:] == ".0":
                 n_txt = n_txt[:-2]
 
-            out_list.append(f"{n_txt} {scale_name}{'s' if n > 1 else ''}")
+            scale_value = translator.t(scale_translation_key, count=n)
+            out_list.append(f"{n_txt} {scale_value}")
 
     if out_list == []:
         return "none"
@@ -437,8 +640,8 @@ def clean_categories(category: str | list) -> list[str]:
         case str(category):
             if not category.strip():
                 return []
-
-            return [category]
+            # Split comma-separated categories
+            return [cat.strip().title() for cat in category.split(",") if cat.strip()]
         case [str(), *_]:
             return [cat.strip().title() for cat in category if cat.strip()]
         case [{"name": str(), "slug": str()}, *_]:
@@ -449,6 +652,9 @@ def clean_categories(category: str | list) -> list[str]:
             # ]
             #
             return [cat["name"] for cat in category if "name" in cat]
+        case int() | float():
+            # Handling for numeric values returned as categories
+            return []
         case _:
             raise TypeError(f"Unexpected type for category: {type(category)}, {category}")
 
@@ -465,7 +671,7 @@ def clean_tags(data: str | list[str]) -> list[str]:
         case [str(), *_]:
             return [tag.strip().title() for tag in data if tag.strip()]
         case str(data):
-            return clean_tags([t for t in data.split(",")])
+            return clean_tags(data.split(","))
         case _:
             return []
             # should probably raise exception
@@ -479,7 +685,7 @@ def clean_nutrition(nutrition: dict | None) -> dict[str, str]:
     list of valid keys
 
     Assumptionas:
-        - All units are supplied in grams, expect sodium which maybe be in milligrams
+        - All units are supplied in grams, expect sodium and cholesterol which maybe be in milligrams
 
     Returns:
         dict[str, str]: If the argument is None, or not a dictionary, an empty dictionary is returned
@@ -493,9 +699,18 @@ def clean_nutrition(nutrition: dict | None) -> dict[str, str]:
             if matched_digits := MATCH_DIGITS.search(val):
                 output_nutrition[key] = matched_digits.group(0).replace(",", ".")
 
-    if sodium := nutrition.get("sodiumContent", None):
-        if isinstance(sodium, str) and "m" not in sodium and "g" in sodium:
-            with contextlib.suppress(AttributeError, TypeError):
-                output_nutrition["sodiumContent"] = str(float(output_nutrition["sodiumContent"]) * 1000)
+    for key in ["sodiumContent", "cholesterolContent"]:
+        if key not in output_nutrition:
+            continue
+        if val := nutrition.get(key, None):
+            if isinstance(val, str) and MATCH_GRAMS.search(val):
+                with contextlib.suppress(AttributeError, TypeError):
+                    output_nutrition[key] = str(float(output_nutrition[key]) * 1000)
+
+    for key in ["calories"]:
+        if val := nutrition.get(key, None):
+            if isinstance(val, int | float):
+                with contextlib.suppress(AttributeError, TypeError):
+                    output_nutrition[key] = str(val)
 
     return output_nutrition

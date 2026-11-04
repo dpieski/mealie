@@ -4,15 +4,22 @@ from fastapi import HTTPException, status
 
 from mealie.core.security import create_access_token
 from mealie.routes._base import BaseUserController, controller
+from mealie.routes._base.permissions import forbidden
 from mealie.routes._base.routers import UserAPIRouter
-from mealie.schema.user import CreateToken, DeleteTokenResponse, LongLiveTokenIn, LongLiveTokenInDB, LongLiveTokenOut
+from mealie.schema.user import (
+    CreateToken,
+    DeleteTokenResponse,
+    LongLiveTokenCreateResponse,
+    LongLiveTokenIn,
+    LongLiveTokenInDB,
+)
 
 router = UserAPIRouter(prefix="/users", tags=["Users: Tokens"])
 
 
 @controller(router)
 class UserApiTokensController(BaseUserController):
-    @router.post("/api-tokens", status_code=status.HTTP_201_CREATED, response_model=LongLiveTokenOut)
+    @router.post("/api-tokens", status_code=status.HTTP_201_CREATED, response_model=LongLiveTokenCreateResponse)
     def create_api_token(
         self,
         token_params: LongLiveTokenIn,
@@ -27,7 +34,7 @@ class UserApiTokensController(BaseUserController):
         }
 
         five_years = timedelta(1825)
-        token = create_access_token(token_data, five_years)
+        token, _ = create_access_token(token_data, five_years)
 
         token_model = CreateToken(
             name=token_params.name,
@@ -48,8 +55,10 @@ class UserApiTokensController(BaseUserController):
         if not token:
             raise HTTPException(status.HTTP_404_NOT_FOUND, f"Could not locate token with id '{token_id}' in database")
 
-        if token.user.email == self.user.email:
+        # Ownership is by user id. Comparing emails happened to work since they're unique, but it
+        # keys authorization on a mutable field and loads the user relationship to do it.
+        if token.user_id == self.user.id:
             deleted_token = self.repos.api_tokens.delete(token_id)
             return DeleteTokenResponse(token_delete=deleted_token.name)
         else:
-            raise HTTPException(status.HTTP_403_FORBIDDEN)
+            raise forbidden()

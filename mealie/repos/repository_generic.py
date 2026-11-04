@@ -2,41 +2,51 @@ from __future__ import annotations
 
 import random
 from collections.abc import Iterable
+from datetime import UTC, datetime
 from math import ceil
-from typing import Any, Generic, TypeVar
+from typing import Any
 
 from fastapi import HTTPException
 from pydantic import UUID4, BaseModel
-from sqlalchemy import Select, case, delete, func, nulls_first, nulls_last, select
+from sqlalchemy import ColumnElement, Select, case, delete, func, nulls_first, nulls_last, select
 from sqlalchemy.orm.session import Session
-from sqlalchemy.sql import sqltypes
 
 from mealie.core.root_logger import get_logger
 from mealie.db.models._model_base import SqlAlchemyBase
 from mealie.schema._mealie import MealieModel
-from mealie.schema.response.pagination import OrderByNullPosition, OrderDirection, PaginationBase, PaginationQuery
-from mealie.schema.response.query_filter import QueryFilter
+from mealie.schema.response.pagination import (
+    OrderByNullPosition,
+    OrderDirection,
+    PaginationBase,
+    PaginationQuery,
+    RequestQuery,
+)
 from mealie.schema.response.query_search import SearchFilter
+from mealie.services.query_filter.builder import NonFilterableValueError, QueryFilterBuilder
 
-Schema = TypeVar("Schema", bound=MealieModel)
-Model = TypeVar("Model", bound=SqlAlchemyBase)
-
-T = TypeVar("T", bound="RepositoryGeneric")
+from ._utils import NOT_SET, NotSet
 
 
-class RepositoryGeneric(Generic[Schema, Model]):
+class RepositoryGeneric[Schema: MealieModel, Model: SqlAlchemyBase]:
     """A Generic BaseAccess Model method to perform common operations on the database
 
     Args:
-        Generic ([Schema]): Represents the Pydantic Model
-        Generic ([Model]): Represents the SqlAlchemyModel Model
+        Schema: Represents the Pydantic Model
+        Model: Represents the SqlAlchemyModel Model
     """
 
-    user_id: UUID4 | None = None
-    group_id: UUID4 | None = None
     session: Session
 
-    def __init__(self, session: Session, primary_key: str, sql_model: type[Model], schema: type[Schema]) -> None:
+    _group_id: UUID4 | None = None
+    _household_id: UUID4 | None = None
+
+    def __init__(
+        self,
+        session: Session,
+        primary_key: str,
+        sql_model: type[Model],
+        schema: type[Schema],
+    ) -> None:
         self.session = session
         self.primary_key = primary_key
         self.model = sql_model
@@ -44,13 +54,20 @@ class RepositoryGeneric(Generic[Schema, Model]):
 
         self.logger = get_logger()
 
-    def by_user(self: T, user_id: UUID4) -> T:
-        self.user_id = user_id
-        return self
+    @property
+    def group_id(self) -> UUID4 | None:
+        return self._group_id
 
-    def by_group(self: T, group_id: UUID4) -> T:
-        self.group_id = group_id
-        return self
+    @property
+    def household_id(self) -> UUID4 | None:
+        return self._household_id
+
+    @property
+    def column_aliases(self) -> dict[str, ColumnElement]:
+        return {}
+
+    def _random_seed(self) -> str:
+        return str(datetime.now(tz=UTC))
 
     def _log_exception(self, e: Exception) -> None:
         self.logger.error(f"Error processing query for Repo model={self.model.__name__} schema={self.schema.__name__}")
@@ -66,47 +83,42 @@ class RepositoryGeneric(Generic[Schema, Model]):
 
     def _filter_builder(self, **kwargs) -> dict[str, Any]:
         dct = {}
-
-        if self.user_id:
-            dct["user_id"] = self.user_id
-
         if self.group_id:
             dct["group_id"] = self.group_id
 
+        if self.household_id:
+            dct["household_id"] = self.household_id
+
         return {**dct, **kwargs}
+
+    def _keep_scope(self, entry: Model, new_data: dict) -> dict:
+        """
+        Overwrites the scope fields in `new_data` with the stored values, so an update can't move a row
+        out of the group or household this repo is scoped to.
+        """
+        for field, scope in (("group_id", self.group_id), ("household_id", self.household_id)):
+            if scope and field in new_data:
+                new_data[field] = getattr(entry, field)
+
+        return new_data
 
     def get_all(
         self,
         limit: int | None = None,
         order_by: str | None = None,
         order_descending: bool = True,
-        start=0,
         override=None,
     ) -> list[Schema]:
-        self.logger.warning('"get_all" method is deprecated; use "page_all" instead')
+        pq = PaginationQuery(
+            per_page=limit or -1,
+            order_by=order_by,
+            order_direction=OrderDirection.desc if order_descending else OrderDirection.asc,
+            page=1,
+        )
 
-        # sourcery skip: remove-unnecessary-cast
-        eff_schema = override or self.schema
+        results = self.page_all(pq, override=override)
 
-        fltr = self._filter_builder()
-
-        q = self._query(override_schema=eff_schema).filter_by(**fltr)
-
-        if order_by:
-            try:
-                order_attr = getattr(self.model, str(order_by))
-                if order_descending:
-                    order_attr = order_attr.desc()
-
-                else:
-                    order_attr = order_attr.asc()
-
-                q = q.order_by(order_attr)
-
-            except AttributeError:
-                self.logger.info(f'Attempted to sort by unknown sort property "{order_by}"; ignoring')
-        result = self.session.execute(q.offset(start).limit(limit)).unique().scalars().all()
-        return [eff_schema.from_orm(x) for x in result]
+        return results.items
 
     def multi_query(
         self,
@@ -129,7 +141,7 @@ class RepositoryGeneric(Generic[Schema, Model]):
 
         q = q.offset(start).limit(limit)
         result = self.session.execute(q).unique().scalars().all()
-        return [eff_schema.from_orm(x) for x in result]
+        return [eff_schema.model_validate(x) for x in result]
 
     def _query_one(self, match_value: str | int | UUID4, match_key: str | None = None) -> Model:
         """
@@ -143,7 +155,11 @@ class RepositoryGeneric(Generic[Schema, Model]):
         return self.session.execute(self._query().filter_by(**fltr)).unique().scalars().one()
 
     def get_one(
-        self, value: str | int | UUID4, key: str | None = None, any_case=False, override_schema=None
+        self,
+        value: str | int | UUID4,
+        key: str | None = None,
+        any_case=False,
+        override_schema=None,
     ) -> Schema | None:
         key = key or self.primary_key
         eff_schema = override_schema or self.schema
@@ -161,11 +177,11 @@ class RepositoryGeneric(Generic[Schema, Model]):
         if not result:
             return None
 
-        return eff_schema.from_orm(result)
+        return eff_schema.model_validate(result)
 
     def create(self, data: Schema | BaseModel | dict) -> Schema:
         try:
-            data = data if isinstance(data, dict) else data.dict()
+            data = data if isinstance(data, dict) else data.model_dump()
             new_document = self.model(session=self.session, **data)
             self.session.add(new_document)
             self.session.commit()
@@ -175,22 +191,26 @@ class RepositoryGeneric(Generic[Schema, Model]):
 
         self.session.refresh(new_document)
 
-        return self.schema.from_orm(new_document)
+        return self.schema.model_validate(new_document)
 
     def create_many(self, data: Iterable[Schema | dict]) -> list[Schema]:
         new_documents = []
-        for document in data:
-            document = document if isinstance(document, dict) else document.dict()
-            new_document = self.model(session=self.session, **document)
-            new_documents.append(new_document)
+        try:
+            for document in data:
+                document = document if isinstance(document, dict) else document.model_dump()
+                new_document = self.model(session=self.session, **document)
+                new_documents.append(new_document)
 
-        self.session.add_all(new_documents)
-        self.session.commit()
+            self.session.add_all(new_documents)
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            raise
 
         for created_document in new_documents:
             self.session.refresh(created_document)
 
-        return [self.schema.from_orm(x) for x in new_documents]
+        return [self.schema.model_validate(x) for x in new_documents]
 
     def update(self, match_value: str | int | UUID4, new_data: dict | BaseModel) -> Schema:
         """Update a database entry.
@@ -202,38 +222,42 @@ class RepositoryGeneric(Generic[Schema, Model]):
         Returns:
             dict: Returns a dictionary representation of the database entry
         """
-        new_data = new_data if isinstance(new_data, dict) else new_data.dict()
+        new_data = new_data if isinstance(new_data, dict) else new_data.model_dump()
 
         entry = self._query_one(match_value=match_value)
-        entry.update(session=self.session, **new_data)
+        entry.update(session=self.session, **self._keep_scope(entry, new_data))
 
         self.session.commit()
-        return self.schema.from_orm(entry)
+        return self.schema.model_validate(entry)
 
     def update_many(self, data: Iterable[Schema | dict]) -> list[Schema]:
         document_data_by_id: dict[str, dict] = {}
         for document in data:
-            document_data = document if isinstance(document, dict) else document.dict()
+            document_data = document if isinstance(document, dict) else document.model_dump()
             document_data_by_id[document_data["id"]] = document_data
 
-        documents_to_update_query = self._query().filter(self.model.id.in_(list(document_data_by_id.keys())))
+        documents_to_update_query = (
+            self._query()
+            .filter(self.model.id.in_(list(document_data_by_id.keys())))
+            .filter_by(**self._filter_builder())
+        )
         documents_to_update = self.session.execute(documents_to_update_query).unique().scalars().all()
 
         updated_documents = []
         for document_to_update in documents_to_update:
-            data = document_data_by_id[document_to_update.id]  # type: ignore
+            data = self._keep_scope(document_to_update, document_data_by_id[document_to_update.id])  # type: ignore
             document_to_update.update(session=self.session, **data)  # type: ignore
             updated_documents.append(document_to_update)
 
         self.session.commit()
-        return [self.schema.from_orm(x) for x in updated_documents]
+        return [self.schema.model_validate(x) for x in updated_documents]
 
     def patch(self, match_value: str | int | UUID4, new_data: dict | BaseModel) -> Schema:
-        new_data = new_data if isinstance(new_data, dict) else new_data.dict()
+        new_data = new_data if isinstance(new_data, dict) else new_data.model_dump()
 
         entry = self._query_one(match_value=match_value)
 
-        entry_as_dict = self.schema.from_orm(entry).dict()
+        entry_as_dict = self.schema.model_validate(entry).model_dump()
         entry_as_dict.update(new_data)
 
         return self.update(match_value, entry_as_dict)
@@ -242,7 +266,7 @@ class RepositoryGeneric(Generic[Schema, Model]):
         match_key = match_key or self.primary_key
 
         result = self._query_one(value, match_key)
-        results_as_model = self.schema.from_orm(result)
+        result_as_model = self.schema.model_validate(result)
 
         try:
             self.session.delete(result)
@@ -251,12 +275,12 @@ class RepositoryGeneric(Generic[Schema, Model]):
             self.session.rollback()
             raise e
 
-        return results_as_model
+        return result_as_model
 
-    def delete_many(self, values: Iterable) -> Schema:
-        query = self._query().filter(self.model.id.in_(values))  # type: ignore
+    def delete_many(self, values: Iterable) -> list[Schema]:
+        query = self._query().filter(self.model.id.in_(values)).filter_by(**self._filter_builder())
         results = self.session.execute(query).unique().scalars().all()
-        results_as_model = [self.schema.from_orm(result) for result in results]
+        results_as_model = [self.schema.model_validate(result) for result in results]
 
         try:
             # we create a delete statement for each row
@@ -269,7 +293,7 @@ class RepositoryGeneric(Generic[Schema, Model]):
             self.session.rollback()
             raise e
 
-        return results_as_model  # type: ignore
+        return results_as_model
 
     def delete_all(self) -> None:
         delete(self.model)
@@ -278,7 +302,7 @@ class RepositoryGeneric(Generic[Schema, Model]):
     def count_all(self, match_key=None, match_value=None) -> int:
         q = select(func.count(self.model.id))
         if None not in [match_key, match_value]:
-            q = q.filter_by(**{match_key: match_value})
+            q = q.where(getattr(self.model, match_key) == match_value)
         return self.session.scalar(q)
 
     def _count_attribute(
@@ -295,25 +319,33 @@ class RepositoryGeneric(Generic[Schema, Model]):
             return self.session.scalar(q)
         else:
             q = self._query(override_schema=eff_schema).filter(attribute_name == attr_match)
-            return [eff_schema.from_orm(x) for x in self.session.execute(q).scalars().all()]
+            return [eff_schema.model_validate(x) for x in self.session.execute(q).scalars().all()]
 
-    def page_all(self, pagination: PaginationQuery, override=None, search: str | None = None) -> PaginationBase[Schema]:
+    def page_all(
+        self,
+        pagination: PaginationQuery,
+        override=None,
+        search: str | None = None,
+        extra_filter: ColumnElement[bool] | None = None,
+    ) -> PaginationBase[Schema]:
         """
         pagination is a method to interact with the filtered database table and return a paginated result
         using the PaginationBase that provides several data points that are needed to manage pagination
         on the client side. This method does utilize the _filter_build method to ensure that the results
-        are filtered by the user and group id when applicable.
+        are filtered by the group id when applicable.
 
         NOTE: When you provide an override you'll need to manually type the result of this method
         as the override, as the type system is not able to infer the result of this method.
         """
         eff_schema = override or self.schema
         # Copy this, because calling methods (e.g. tests) might rely on it not getting mutated
-        pagination_result = pagination.copy()
+        pagination_result = pagination.model_copy()
         q = self._query(override_schema=eff_schema, with_options=False)
 
         fltr = self._filter_builder()
         q = q.filter_by(**fltr)
+        if extra_filter is not None:
+            q = q.filter(extra_filter)
         if search:
             q = self.add_search_to_query(q, eff_schema, search)
 
@@ -336,7 +368,7 @@ class RepositoryGeneric(Generic[Schema, Model]):
             per_page=pagination_result.per_page,
             total=count,
             total_pages=total_pages,
-            items=[eff_schema.from_orm(s) for s in data],
+            items=[eff_schema.model_validate(s) for s in data],
         )
 
     def add_pagination_to_query(self, query: Select, pagination: PaginationQuery) -> tuple[Select, int, int]:
@@ -351,21 +383,23 @@ class RepositoryGeneric(Generic[Schema, Model]):
 
         if pagination.query_filter:
             try:
-                query_filter = QueryFilter(pagination.query_filter)
-                query = query_filter.filter_query(query, model=self.model)
+                query_filter_builder = QueryFilterBuilder(pagination.query_filter)
+                query = query_filter_builder.filter_query(query, model=self.model, column_aliases=self.column_aliases)
 
             except ValueError as e:
                 self.logger.error(e)
                 raise HTTPException(status_code=400, detail=str(e)) from e
 
-        count_query = select(func.count()).select_from(query)
+        count_query = select(func.count()).select_from(query.order_by(None).distinct().subquery())
         count = self.session.scalar(count_query)
         if not count:
             count = 0
 
         # interpret -1 as "get_all"
+        limit: int | None = pagination.per_page
         if pagination.per_page == -1:
             pagination.per_page = count
+            limit = None
 
         try:
             total_pages = ceil(count / pagination.per_page)
@@ -381,26 +415,52 @@ class RepositoryGeneric(Generic[Schema, Model]):
             pagination.page = 1
 
         query = self.add_order_by_to_query(query, pagination)
-        return query.limit(pagination.per_page).offset((pagination.page - 1) * pagination.per_page), count, total_pages
 
-    def add_order_by_to_query(self, query: Select, pagination: PaginationQuery) -> Select:
-        if not pagination.order_by:
+        if limit is not None:
+            query = query.limit(limit)
+
+        return query.offset((pagination.page - 1) * pagination.per_page), count, total_pages
+
+    def add_order_attr_to_query(
+        self,
+        query: Select,
+        order_attr: ColumnElement,
+        order_dir: OrderDirection,
+        order_by_null: OrderByNullPosition | None,
+    ) -> Select:
+        if order_dir is OrderDirection.asc:
+            order_attr = order_attr.asc()
+        elif order_dir is OrderDirection.desc:
+            order_attr = order_attr.desc()
+
+        if order_by_null is OrderByNullPosition.first:
+            order_attr = nulls_first(order_attr)
+        elif order_by_null is OrderByNullPosition.last:
+            order_attr = nulls_last(order_attr)
+
+        return query.order_by(order_attr)
+
+    def add_order_by_to_query(self, query: Select, request_query: RequestQuery) -> Select:
+        if not request_query.order_by:
             return query
 
-        elif pagination.order_by == "random":
+        elif request_query.order_by == "random":
             # randomize outside of database, since not all db's can set random seeds
             # this solution is db-independent & stable to paging
             temp_query = query.with_only_columns(self.model.id)
             allids = self.session.execute(temp_query).scalars().all()  # fast because id is indexed
+            if not allids:
+                return query
+
             order = list(range(len(allids)))
-            random.seed(pagination.pagination_seed)
+            random.seed(request_query.pagination_seed)
             random.shuffle(order)
             random_dict = dict(zip(allids, order, strict=True))
             case_stmt = case(random_dict, value=self.model.id)
             return query.order_by(case_stmt)
 
         else:
-            for order_by_val in pagination.order_by.split(","):
+            for order_by_val in request_query.order_by.split(","):
                 try:
                     order_by_val = order_by_val.strip()
                     if ":" in order_by_val:
@@ -408,32 +468,29 @@ class RepositoryGeneric(Generic[Schema, Model]):
                         order_dir = OrderDirection(order_dir_val)
                     else:
                         order_by = order_by_val
-                        order_dir = pagination.order_direction
+                        order_dir = request_query.order_direction
 
-                    _, order_attr, query = QueryFilter.get_model_and_model_attr_from_attr_string(
-                        order_by, self.model, query=query
+                    order_attr = QueryFilterBuilder.get_order_attr(
+                        order_by,
+                        self.model,
+                        descending=order_dir is OrderDirection.desc,
+                        column_aliases=self.column_aliases,
                     )
 
-                    if order_dir is OrderDirection.asc:
-                        order_attr = order_attr.asc()
-                    elif order_dir is OrderDirection.desc:
-                        order_attr = order_attr.desc()
+                    query = self.add_order_attr_to_query(
+                        query, order_attr, order_dir, request_query.order_by_null_position
+                    )
 
-                    # queries handle uppercase and lowercase differently, which is undesirable
-                    if isinstance(order_attr.type, sqltypes.String):
-                        order_attr = func.lower(order_attr)
-
-                    if pagination.order_by_null_position is OrderByNullPosition.first:
-                        order_attr = nulls_first(order_attr)
-                    elif pagination.order_by_null_position is OrderByNullPosition.last:
-                        order_attr = nulls_last(order_attr)
-
-                    query = query.order_by(order_attr)
+                except NonFilterableValueError as e:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f'Invalid order_by statement "{request_query.order_by}": {e.message}',
+                    ) from e
 
                 except ValueError as e:
                     raise HTTPException(
                         status_code=400,
-                        detail=f'Invalid order_by statement "{pagination.order_by}": "{order_by_val}" is invalid',
+                        detail=f'Invalid order_by statement "{request_query.order_by}": "{order_by_val}" is invalid',
                     ) from e
 
             return query
@@ -441,3 +498,40 @@ class RepositoryGeneric(Generic[Schema, Model]):
     def add_search_to_query(self, query: Select, schema: type[Schema], search: str) -> Select:
         search_filter = SearchFilter(self.session, search, schema._normalize_search)
         return search_filter.filter_query_by_search(query, schema, self.model)
+
+
+class GroupRepositoryGeneric[Schema: MealieModel, Model: SqlAlchemyBase](RepositoryGeneric[Schema, Model]):
+    def __init__(
+        self,
+        session: Session,
+        primary_key: str,
+        sql_model: type[Model],
+        schema: type[Schema],
+        *,
+        group_id: UUID4 | None | NotSet,
+    ) -> None:
+        super().__init__(session, primary_key, sql_model, schema)
+        if group_id is NOT_SET:
+            raise ValueError("group_id must be set")
+        self._group_id = group_id if group_id else None
+
+
+class HouseholdRepositoryGeneric[Schema: MealieModel, Model: SqlAlchemyBase](RepositoryGeneric[Schema, Model]):
+    def __init__(
+        self,
+        session: Session,
+        primary_key: str,
+        sql_model: type[Model],
+        schema: type[Schema],
+        *,
+        group_id: UUID4 | None | NotSet,
+        household_id: UUID4 | None | NotSet,
+    ) -> None:
+        super().__init__(session, primary_key, sql_model, schema)
+        if group_id is NOT_SET:
+            raise ValueError("group_id must be set")
+        self._group_id = group_id if group_id else None
+
+        if household_id is NOT_SET:
+            raise ValueError("household_id must be set")
+        self._household_id = household_id if household_id else None

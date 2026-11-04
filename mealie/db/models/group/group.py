@@ -1,46 +1,51 @@
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 import sqlalchemy.orm as orm
-from sqlalchemy import select
+from pydantic import ConfigDict
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.orm.session import Session
 
-from mealie.core.config import get_app_settings
-from mealie.db.models.labels import MultiPurposeLabel
+from mealie.db.models.recipe.labels import MultiPurposeLabel
 
-from .._model_base import BaseMixins, SqlAlchemyBase
-from .._model_utils import GUID, auto_init
-from ..group.invite_tokens import GroupInviteToken
-from ..group.webhooks import GroupWebhooksModel
+from .._model_base import BaseMixins, FilterableColumn, SqlAlchemyBase
+from .._model_utils.auto_init import auto_init
+from .._model_utils.guid import GUID
+from ..household.cookbook import CookBook
+from ..household.invite_tokens import GroupInviteToken
+from ..household.mealplan import GroupMealPlan
+from ..household.webhooks import GroupWebhooksModel
 from ..recipe.category import Category, group_to_categories
 from ..server.task import ServerTaskModel
-from .cookbook import CookBook
-from .mealplan import GroupMealPlan
+from .ai_providers import AIProviderSettings
 from .preferences import GroupPreferencesModel
 
 if TYPE_CHECKING:
+    from ..household import Household
+    from ..household.events import GroupEventNotifierModel
+    from ..household.recipe_action import GroupRecipeAction
+    from ..household.shopping_list import ShoppingList
     from ..recipe import IngredientFoodModel, IngredientUnitModel, RecipeModel, Tag, Tool
     from ..users import User
-    from .events import GroupEventNotifierModel
     from .exports import GroupDataExportsModel
     from .report import ReportModel
-    from .shopping_list import ShoppingList
 
 
 class Group(SqlAlchemyBase, BaseMixins):
     __tablename__ = "groups"
-    id: Mapped[GUID] = mapped_column(GUID, primary_key=True, default=GUID.generate)
-    name: Mapped[str] = mapped_column(sa.String, index=True, nullable=False, unique=True)
-    slug: Mapped[str | None] = mapped_column(sa.String, index=True, unique=True)
-    users: Mapped[list["User"]] = orm.relationship("User", back_populates="group")
-    categories: Mapped[Category] = orm.relationship(
-        Category, secondary=group_to_categories, single_parent=True, uselist=True
+    id: FilterableColumn[GUID] = mapped_column(GUID, primary_key=True, default=GUID.generate)
+    name: FilterableColumn[str] = mapped_column(sa.String, index=True, nullable=False, unique=True)
+    slug: FilterableColumn[str | None] = mapped_column(sa.String, index=True, unique=True)
+    households: Mapped[list[Household]] = orm.relationship(
+        "Household", back_populates="group", cascade="all, delete-orphan"
     )
+    users: Mapped[list[User]] = orm.relationship("User", back_populates="group")
+    categories: Mapped[list[Category]] = orm.relationship(Category, secondary=group_to_categories, single_parent=True)
 
     invite_tokens: Mapped[list[GroupInviteToken]] = orm.relationship(
-        GroupInviteToken, back_populates="group", cascade="all, delete-orphan", uselist=True
+        GroupInviteToken, back_populates="group", cascade="all, delete-orphan"
     )
+
+    # Config
     preferences: Mapped[GroupPreferencesModel] = orm.relationship(
         GroupPreferencesModel,
         back_populates="group",
@@ -48,9 +53,18 @@ class Group(SqlAlchemyBase, BaseMixins):
         single_parent=True,
         cascade="all, delete-orphan",
     )
+    ai_provider_settings: Mapped[AIProviderSettings] = orm.relationship(
+        AIProviderSettings,
+        back_populates="group",
+        uselist=False,
+        single_parent=True,
+        cascade="all, delete-orphan",
+    )
 
     # Recipes
-    recipes: Mapped[list["RecipeModel"]] = orm.relationship("RecipeModel", back_populates="group", uselist=True)
+    recipes: Mapped[list[RecipeModel]] = orm.relationship(
+        "RecipeModel", back_populates="group", cascade="all, delete-orphan"
+    )
 
     # CRUD From Others
     common_args = {
@@ -65,42 +79,37 @@ class Group(SqlAlchemyBase, BaseMixins):
         GroupMealPlan, order_by="GroupMealPlan.date", **common_args
     )
     webhooks: Mapped[list[GroupWebhooksModel]] = orm.relationship(GroupWebhooksModel, **common_args)
+    recipe_actions: Mapped[list[GroupRecipeAction]] = orm.relationship("GroupRecipeAction", **common_args)
     cookbooks: Mapped[list[CookBook]] = orm.relationship(CookBook, **common_args)
-    server_tasks: Mapped[list[ServerTaskModel]] = orm.relationship(ServerTaskModel, **common_args)
-    data_exports: Mapped[list["GroupDataExportsModel"]] = orm.relationship("GroupDataExportsModel", **common_args)
-    shopping_lists: Mapped[list["ShoppingList"]] = orm.relationship("ShoppingList", **common_args)
-    group_reports: Mapped[list["ReportModel"]] = orm.relationship("ReportModel", **common_args)
-    group_event_notifiers: Mapped[list["GroupEventNotifierModel"]] = orm.relationship(
+    server_tasks: Mapped[list[ServerTaskModel]] = orm.relationship("ServerTaskModel", **common_args)
+    data_exports: Mapped[list[GroupDataExportsModel]] = orm.relationship("GroupDataExportsModel", **common_args)
+    shopping_lists: Mapped[list[ShoppingList]] = orm.relationship("ShoppingList", **common_args)
+    group_reports: Mapped[list[ReportModel]] = orm.relationship("ReportModel", **common_args)
+    group_event_notifiers: Mapped[list[GroupEventNotifierModel]] = orm.relationship(
         "GroupEventNotifierModel", **common_args
     )
 
     # Owned Models
-    ingredient_units: Mapped[list["IngredientUnitModel"]] = orm.relationship("IngredientUnitModel", **common_args)
-    ingredient_foods: Mapped[list["IngredientFoodModel"]] = orm.relationship("IngredientFoodModel", **common_args)
-    tools: Mapped[list["Tool"]] = orm.relationship("Tool", **common_args)
-    tags: Mapped[list["Tag"]] = orm.relationship("Tag", **common_args)
-
-    class Config:
-        exclude = {
+    ingredient_units: Mapped[list[IngredientUnitModel]] = orm.relationship("IngredientUnitModel", **common_args)
+    ingredient_foods: Mapped[list[IngredientFoodModel]] = orm.relationship("IngredientFoodModel", **common_args)
+    tools: Mapped[list[Tool]] = orm.relationship("Tool", **common_args)
+    tags: Mapped[list[Tag]] = orm.relationship("Tag", **common_args)
+    model_config = ConfigDict(
+        exclude={
+            "households",
             "users",
             "webhooks",
+            "recipe_actions",
             "shopping_lists",
             "cookbooks",
             "preferences",
+            "ai_provider_settings",
             "invite_tokens",
             "mealplans",
             "data_exports",
         }
+    )
 
     @auto_init()
     def __init__(self, **_) -> None:
         pass
-
-    @staticmethod  # TODO: Remove this
-    def get_by_name(session: Session, name: str) -> Optional["Group"]:
-        settings = get_app_settings()
-
-        item = session.execute(select(Group).filter(Group.name == name)).scalars().one_or_none()
-        if item is None:
-            item = session.execute(select(Group).filter(Group.name == settings.DEFAULT_GROUP)).scalars().one_or_none()
-        return item

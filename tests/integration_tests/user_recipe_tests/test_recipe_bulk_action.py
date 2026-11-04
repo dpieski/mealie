@@ -1,12 +1,11 @@
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator
 
 import pytest
 import sqlalchemy
 from fastapi.testclient import TestClient
 
 from mealie.core.dependencies.dependencies import validate_file_token
-from mealie.repos.repository_factory import AllRepositories
 from mealie.schema.recipe.recipe_bulk_actions import ExportTypes
 from mealie.schema.recipe.recipe_category import CategorySave, TagSave
 from tests import utils
@@ -16,9 +15,8 @@ from tests.utils.fixture_schemas import TestUser
 
 
 @pytest.fixture(scope="function")
-def ten_slugs(
-    api_client: TestClient, unique_user: TestUser, database: AllRepositories
-) -> Generator[list[str], None, None]:
+def ten_slugs(api_client: TestClient, unique_user: TestUser) -> Generator[list[str]]:
+    database = unique_user.repos
     slugs: list[str] = []
 
     for _ in range(10):
@@ -38,15 +36,15 @@ def ten_slugs(
             pass
 
 
-def test_bulk_tag_recipes(
-    api_client: TestClient, unique_user: TestUser, database: AllRepositories, ten_slugs: list[str]
-):
+def test_bulk_tag_recipes(api_client: TestClient, unique_user: TestUser, ten_slugs: list[str]):
+    database = unique_user.repos
+
     # Setup Tags
     tags = []
     for _ in range(3):
         tag_name = random_string()
         tag = database.tags.create(TagSave(group_id=unique_user.group_id, name=tag_name))
-        tags.append(tag.dict())
+        tags.append(tag.model_dump())
 
     payload = {"recipes": ten_slugs, "tags": tags}
 
@@ -66,15 +64,16 @@ def test_bulk_tag_recipes(
 def test_bulk_categorize_recipes(
     api_client: TestClient,
     unique_user: TestUser,
-    database: AllRepositories,
     ten_slugs: list[str],
 ):
+    database = unique_user.repos
+
     # Setup Tags
     categories = []
     for _ in range(3):
         cat_name = random_string()
         cat = database.categories.create(CategorySave(group_id=unique_user.group_id, name=cat_name))
-        categories.append(cat.dict())
+        categories.append(cat.model_dump())
 
     payload = {"recipes": ten_slugs, "categories": categories}
 
@@ -94,9 +93,9 @@ def test_bulk_categorize_recipes(
 def test_bulk_delete_recipes(
     api_client: TestClient,
     unique_user: TestUser,
-    database: AllRepositories,
     ten_slugs: list[str],
 ):
+    database = unique_user.repos
     payload = {"recipes": ten_slugs}
 
     response = api_client.post(api_routes.recipes_bulk_actions_delete, json=payload, headers=unique_user.token)
@@ -124,11 +123,12 @@ def test_bulk_export_recipes(api_client: TestClient, unique_user: TestUser, ten_
     response_data = response.json()
     assert len(response_data) == 1
 
+    export_id = response_data[0]["id"]
     export_path = response_data[0]["path"]
 
     # Get Export Token
     response = api_client.get(
-        f"{api_routes.recipes_bulk_actions_export_download}?path={export_path}", headers=unique_user.token
+        f"{api_routes.recipes_bulk_actions_export_export_id_download(export_id)}", headers=unique_user.token
     )
     assert response.status_code == 200
 
@@ -137,7 +137,7 @@ def test_bulk_export_recipes(api_client: TestClient, unique_user: TestUser, ten_
     assert validate_file_token(response_data["fileToken"]) == Path(export_path)
 
     # Use Export Token to download export
-    response = api_client.get(f'/api/utils/download?token={response_data["fileToken"]}')
+    response = api_client.get(f"/api/utils/download?token={response_data['fileToken']}")
 
     assert response.status_code == 200
 

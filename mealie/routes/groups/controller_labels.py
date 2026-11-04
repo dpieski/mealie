@@ -1,11 +1,12 @@
 from functools import cached_property
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import UUID4
 
-from mealie.routes._base.base_controllers import BaseUserController
+from mealie.routes._base.base_controllers import BaseCrudController
 from mealie.routes._base.controller import controller
 from mealie.routes._base.mixins import HttpRepo
+from mealie.routes._base.permissions import Perm, require
 from mealie.routes._base.routers import MealieCrudRoute
 from mealie.schema.labels import (
     MultiPurposeLabelCreate,
@@ -13,18 +14,19 @@ from mealie.schema.labels import (
     MultiPurposeLabelSummary,
     MultiPurposeLabelUpdate,
 )
-from mealie.schema.labels.multi_purpose_label import MultiPurposeLabelPagination
+from mealie.schema.labels.multi_purpose_label import MultiPurposeLabelMerge, MultiPurposeLabelPagination
 from mealie.schema.response.pagination import PaginationQuery
+from mealie.services.event_bus_service.event_types import EventLabelData, EventOperation, EventTypes
 from mealie.services.group_services.labels_service import MultiPurposeLabelService
 
-router = APIRouter(prefix="/groups/labels", tags=["Group: Multi Purpose Labels"], route_class=MealieCrudRoute)
+router = APIRouter(prefix="/groups/labels", tags=["Groups: Multi Purpose Labels"], route_class=MealieCrudRoute)
 
 
 @controller(router)
-class MultiPurposeLabelsController(BaseUserController):
+class MultiPurposeLabelsController(BaseCrudController):
     @cached_property
     def service(self):
-        return MultiPurposeLabelService(self.repos, self.group.id)
+        return MultiPurposeLabelService(self.repos)
 
     @cached_property
     def repo(self):
@@ -48,21 +50,68 @@ class MultiPurposeLabelsController(BaseUserController):
             search=search,
         )
 
-        response.set_pagination_guides(router.url_path_for("get_all"), q.dict())
+        response.set_pagination_guides(router.url_path_for("get_all"), q.model_dump())
         return response
 
-    @router.post("", response_model=MultiPurposeLabelOut)
+    @router.post("", response_model=MultiPurposeLabelOut, dependencies=[require(Perm.GROUP_ORGANIZE)])
     def create_one(self, data: MultiPurposeLabelCreate):
-        return self.service.create_one(data)
+        try:
+            new_label = self.service.create_one(data)
+        except Exception as ex:
+            self.mixins.handle_exception(ex)
+            raise  # handle_exception always raises; this satisfies static analysis
+        self.publish_event(
+            event_type=EventTypes.label_created,
+            document_data=EventLabelData(operation=EventOperation.create, label_id=new_label.id),
+            group_id=new_label.group_id,
+            household_id=None,
+            message=self.t("notifications.generic-created", name=new_label.name),
+        )
+        return new_label
+
+    @router.get("/empty", response_model=list[MultiPurposeLabelOut])
+    def get_all_empty(self):
+        """Returns a list of labels that are not used by any food or shopping list item"""
+        return self.repo.get_empty()
+
+    @router.post("/merge", response_model=MultiPurposeLabelOut, dependencies=[require(Perm.GROUP_ORGANIZE)])
+    def merge_labels(self, body: MultiPurposeLabelMerge):
+        """Merges the from_id label into the to_id label, then deletes from_id."""
+        if body.from_id == body.to_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "from_id and to_id must be different")
+
+        if not self.repo.get_one(body.from_id):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "from_id label not found")
+        if not self.repo.get_one(body.to_id):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "to_id label not found")
+
+        return self.repo.merge(body.from_id, body.to_id)
 
     @router.get("/{item_id}", response_model=MultiPurposeLabelOut)
     def get_one(self, item_id: UUID4):
-        return self.repo.get_one(item_id)
+        return self.mixins.get_one(item_id)
 
-    @router.put("/{item_id}", response_model=MultiPurposeLabelOut)
+    @router.put("/{item_id}", response_model=MultiPurposeLabelOut, dependencies=[require(Perm.GROUP_ORGANIZE)])
     def update_one(self, item_id: UUID4, data: MultiPurposeLabelUpdate):
-        return self.mixins.update_one(data, item_id)
+        label = self.mixins.update_one(data, item_id)
+        self.publish_event(
+            event_type=EventTypes.label_updated,
+            document_data=EventLabelData(operation=EventOperation.update, label_id=label.id),
+            group_id=label.group_id,
+            household_id=None,
+            message=self.t("notifications.generic-updated", name=label.name),
+        )
+        return label
 
-    @router.delete("/{item_id}", response_model=MultiPurposeLabelOut)
+    @router.delete("/{item_id}", response_model=MultiPurposeLabelOut, dependencies=[require(Perm.GROUP_ORGANIZE)])
     def delete_one(self, item_id: UUID4):
-        return self.mixins.delete_one(item_id)  # type: ignore
+        label = self.mixins.delete_one(item_id)
+        if label:
+            self.publish_event(
+                event_type=EventTypes.label_deleted,
+                document_data=EventLabelData(operation=EventOperation.delete, label_id=label.id),
+                group_id=label.group_id,
+                household_id=None,
+                message=self.t("notifications.generic-deleted", name=label.name),
+            )
+        return label

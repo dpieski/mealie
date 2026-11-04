@@ -3,13 +3,19 @@ from uuid import UUID
 
 from fastapi.testclient import TestClient
 
-from mealie.repos.repository_factory import AllRepositories
 from mealie.schema.recipe.recipe import Recipe
-from tests.utils import api_routes, random_string
+from tests.utils import random_string
 from tests.utils.fixture_schemas import TestUser
 
+# The validators router is hidden from the OpenAPI schema, so these aren't in the generated
+# api_routes helpers.
+VALIDATORS_USER_NAME = "/api/validators/user/name"
+VALIDATORS_USER_EMAIL = "/api/validators/user/email"
+VALIDATORS_GROUP = "/api/validators/group"
+VALIDATORS_RECIPE = "/api/validators/recipe"
 
-@dataclass(slots=True)
+
+@dataclass()
 class SimpleCase:
     value: str
     is_valid: bool
@@ -22,7 +28,7 @@ def test_validators_username(api_client: TestClient, unique_user: TestUser):
     ]
 
     for user in users:
-        response = api_client.get(api_routes.validators_user_name + "?name=" + user.value)
+        response = api_client.get(VALIDATORS_USER_NAME + "?name=" + user.value)
         assert response.status_code == 200
         response_data = response.json()
         assert response_data["valid"] == user.is_valid
@@ -35,14 +41,28 @@ def test_validators_email(api_client: TestClient, unique_user: TestUser):
     ]
 
     for user in emails:
-        response = api_client.get(api_routes.validators_user_email + "?email=" + user.value)
+        response = api_client.get(VALIDATORS_USER_EMAIL + "?email=" + user.value)
         assert response.status_code == 200
         response_data = response.json()
         assert response_data["valid"] == user.is_valid
 
 
-def test_validators_group_name(api_client: TestClient, unique_user: TestUser, database: AllRepositories):
+def test_validators_user_allow_current_user(api_client: TestClient, unique_user: TestUser, g2_user: TestUser):
+    for route, value in [
+        (VALIDATORS_USER_NAME + "?name=" + unique_user.username, True),
+        (VALIDATORS_USER_EMAIL + "?email=" + unique_user.email, True),
+        (VALIDATORS_USER_NAME + "?name=" + g2_user.username, False),
+        (VALIDATORS_USER_EMAIL + "?email=" + g2_user.email, False),
+    ]:
+        response = api_client.get(route, headers=unique_user.token)
+        assert response.status_code == 200
+        assert response.json()["valid"] is value
+
+
+def test_validators_group_name(api_client: TestClient, unique_user: TestUser):
+    database = unique_user.repos
     group = database.groups.get_one(unique_user.group_id)
+    assert group
 
     groups = [
         SimpleCase(value=group.name, is_valid=False),
@@ -50,7 +70,7 @@ def test_validators_group_name(api_client: TestClient, unique_user: TestUser, da
     ]
 
     for user in groups:
-        response = api_client.get(api_routes.validators_group + "?name=" + user.value)
+        response = api_client.get(VALIDATORS_GROUP + "?name=" + user.value)
         assert response.status_code == 200
         response_data = response.json()
         assert response_data["valid"] == user.is_valid
@@ -65,13 +85,13 @@ class RecipeValidators:
 
 def test_validators_recipe(api_client: TestClient, random_recipe: Recipe):
     recipes = [
-        RecipeValidators(name=random_recipe.name, group=random_recipe.group_id, is_valid=False),
+        RecipeValidators(name=random_recipe.name or "", group=random_recipe.group_id, is_valid=False),
         RecipeValidators(name=random_string(), group=random_recipe.group_id, is_valid=True),
         RecipeValidators(name=random_string(), group=random_recipe.group_id, is_valid=True),
     ]
 
     for recipe in recipes:
-        response = api_client.get(api_routes.validators_recipe + f"?group_id={recipe.group}&name={recipe.name}")
+        response = api_client.get(VALIDATORS_RECIPE + f"?group_id={recipe.group}&name={recipe.name}")
         assert response.status_code == 200
         response_data = response.json()
         assert response_data["valid"] == recipe.is_valid

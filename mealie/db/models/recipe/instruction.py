@@ -1,13 +1,24 @@
+from pydantic import ConfigDict
 from sqlalchemy import ForeignKey, Integer, String, orm
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .._model_base import BaseMixins, SqlAlchemyBase
-from .._model_utils import auto_init
+from .._model_utils.auto_init import auto_init
 from .._model_utils.guid import GUID
 
 
 class RecipeIngredientRefLink(SqlAlchemyBase, BaseMixins):
     __tablename__ = "recipe_ingredient_ref_link"
+    instruction_id: Mapped[GUID | None] = mapped_column(GUID, ForeignKey("recipe_instructions.id"), index=True)
+    reference_id: Mapped[GUID | None] = mapped_column(GUID, index=True)
+
+    @auto_init()
+    def __init__(self, **_) -> None:
+        pass
+
+
+class RecipeNoteRefLink(SqlAlchemyBase, BaseMixins):
+    __tablename__ = "recipe_note_ref_link"
     instruction_id: Mapped[GUID | None] = mapped_column(GUID, ForeignKey("recipe_instructions.id"), index=True)
     reference_id: Mapped[GUID | None] = mapped_column(GUID, index=True)
 
@@ -22,19 +33,26 @@ class RecipeInstruction(SqlAlchemyBase):
     recipe_id: Mapped[GUID | None] = mapped_column(GUID, ForeignKey("recipes.id"), index=True)
     position: Mapped[int | None] = mapped_column(Integer, index=True)
     type: Mapped[str | None] = mapped_column(String, default="")
-    title: Mapped[str | None] = mapped_column(String)
-    text: Mapped[str | None] = mapped_column(String, index=True)
+    title: Mapped[str | None] = mapped_column(String)  # This is the section title
+    text: Mapped[str | None] = mapped_column(String)
+    summary: Mapped[str | None] = mapped_column(String)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer)
 
     ingredient_references: Mapped[list[RecipeIngredientRefLink]] = orm.relationship(
         RecipeIngredientRefLink, cascade="all, delete-orphan"
     )
-
-    class Config:
-        exclude = {
+    note_references: Mapped[list[RecipeNoteRefLink]] = orm.relationship(RecipeNoteRefLink, cascade="all, delete-orphan")
+    model_config = ConfigDict(
+        exclude={
             "id",
             "ingredient_references",
+            "note_references",
         }
+    )
 
     @auto_init()
-    def __init__(self, ingredient_references, session, **_) -> None:
-        self.ingredient_references = [RecipeIngredientRefLink(**ref, session=session) for ref in ingredient_references]
+    def __init__(self, session, ingredient_references=None, note_references=None, **_) -> None:
+        self.ingredient_references = [
+            RecipeIngredientRefLink(**ref, session=session) for ref in (ingredient_references or [])
+        ]
+        self.note_references = [RecipeNoteRefLink(**ref, session=session) for ref in (note_references or [])]

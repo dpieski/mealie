@@ -1,26 +1,35 @@
-import shutil
 import tempfile
-from collections.abc import AsyncGenerator, Callable, Generator
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from pathlib import Path
+from shutil import rmtree
 from uuid import uuid4
 
 import fastapi
+import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
+from jwt.exceptions import PyJWTError
 from sqlalchemy.orm.session import Session
 
+from mealie.core import root_logger
 from mealie.core.config import get_app_dirs, get_app_settings
+from mealie.core.security.tokens import ALGORITHM
 from mealie.db.db_setup import generate_session
 from mealie.repos.all_repositories import get_repositories
 from mealie.schema.user import PrivateUser, TokenData
 from mealie.schema.user.user import DEFAULT_INTEGRATION_ID, GroupInDB
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 oauth2_scheme_soft_fail = OAuth2PasswordBearer(tokenUrl="/api/auth/token", auto_error=False)
-ALGORITHM = "HS256"
 app_dirs = get_app_dirs()
 settings = get_app_settings()
+logger = root_logger.get_logger("dependencies")
+
+credentials_exception = HTTPException(
+    status_code=status.HTTP_401_UNAUTHORIZED,
+    detail="Could not validate credentials",
+    headers={"WWW-Authenticate": "Bearer"},
+)
 
 
 async def is_logged_in(token: str = Depends(oauth2_scheme_soft_fail), session=Depends(generate_session)) -> bool:
@@ -64,33 +73,40 @@ async def get_public_group(group_slug: str = fastapi.Path(...), session=Depends(
         return group
 
 
-async def try_get_current_user(
+async def get_auth_token(
     request: Request,
-    token: str = Depends(oauth2_scheme_soft_fail),
+    token: str | None = Depends(oauth2_scheme_soft_fail),
+) -> str:
+    """The raw bearer token for this request, from the Authorization header or the session cookie.
+
+    FastAPI caches dependency results per request, so routes that need the token itself as well as
+    the user it resolves to share a single extraction.
+    """
+    if token is None and "mealie.access_token" in request.cookies:
+        # Try extract from cookie
+        return request.cookies.get("mealie.access_token", "")
+
+    return token or ""
+
+
+async def try_get_current_user(
+    token: str = Depends(get_auth_token),
     session=Depends(generate_session),
 ) -> PrivateUser | None:
     try:
-        return await get_current_user(request, token, session)
+        return await get_current_user(token, session)
     except Exception:
         return None
 
 
 async def get_current_user(
-    request: Request, token: str = Depends(oauth2_scheme_soft_fail), session=Depends(generate_session)
+    token: str = Depends(get_auth_token),
+    session=Depends(generate_session),
 ) -> PrivateUser:
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    if token is None and "mealie.access_token" in request.cookies:
-        # Try extract from cookie
-        token = request.cookies.get("mealie.access_token", "")
-
     try:
         payload = jwt.decode(token, settings.SECRET, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
-        long_token: str = payload.get("long_token")
+        user_id: str | None = payload.get("sub")
+        long_token: str | None = payload.get("long_token")
 
         if long_token is not None:
             return validate_long_live_token(session, token, payload.get("id"))
@@ -99,10 +115,10 @@ async def get_current_user(
             raise credentials_exception
 
         token_data = TokenData(user_id=user_id)
-    except JWTError as e:
+    except PyJWTError as e:
         raise credentials_exception from e
 
-    repos = get_repositories(session)
+    repos = get_repositories(session, group_id=None, household_id=None)
 
     user = repos.users.get_one(token_data.user_id, "id", any_case=False)
 
@@ -111,21 +127,26 @@ async def get_current_user(
     session.commit()
     if user is None:
         raise credentials_exception
+
+    # A password change invalidates everything issued before it. Tokens minted before `iat` existed
+    # carry no issue time, and since they necessarily predate any password change, they fail closed.
+    if user.tokens_valid_after is not None:
+        issued_at = payload.get("iat")
+        if issued_at is None or issued_at < user.tokens_valid_after.timestamp():
+            raise credentials_exception
+
     return user
 
 
-async def get_integration_id(token: str = Depends(oauth2_scheme)) -> str:
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
+async def get_integration_id(token: str = Depends(get_auth_token)) -> str:
+    # Shares get_current_user's token source, cookie fallback included. Reading the header directly
+    # would 401 every cookie-authenticated request to a BaseUserController route, which depends on
+    # both.
     try:
         decoded_token = jwt.decode(token, settings.SECRET, algorithms=[ALGORITHM])
         return decoded_token.get("integration_id", DEFAULT_INTEGRATION_ID)
 
-    except JWTError as e:
+    except PyJWTError as e:
         raise credentials_exception from e
 
 
@@ -136,13 +157,21 @@ async def get_admin_user(current_user: PrivateUser = Depends(get_current_user)) 
 
 
 def validate_long_live_token(session: Session, client_token: str, user_id: str) -> PrivateUser:
-    repos = get_repositories(session)
+    repos = get_repositories(session, group_id=None, household_id=None)
 
     token = repos.api_tokens.multi_query({"token": client_token, "user_id": user_id})
 
     try:
-        return token[0].user
+        user = token[0].user
+        # Match get_current_user(): end the read transaction opened during auth
+        # immediately, otherwise long-lived/API-token auth can hold a DB
+        # connection idle-in-transaction until request teardown. Browsers/PWAs
+        # and automation issuing many concurrent requests can then exhaust
+        # SQLAlchemy's connection pool.
+        session.commit()
+        return user
     except IndexError as e:
+        session.rollback()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED) from e
 
 
@@ -160,8 +189,11 @@ def validate_file_token(token: str | None = None) -> Path:
 
     try:
         payload = jwt.decode(token, settings.SECRET, algorithms=[ALGORITHM])
-        file_path = Path(payload.get("file"))
-    except JWTError as e:
+        # A valid signature isn't enough on its own: session and API tokens are signed with the same
+        # secret and decode fine here. Only tokens from create_file_token carry a path, so a missing
+        # or unusable claim is an invalid file token rather than a server error.
+        file_path = Path(payload["file"])
+    except (PyJWTError, KeyError, TypeError) as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="could not validate file token",
@@ -173,57 +205,29 @@ def validate_file_token(token: str | None = None) -> Path:
     return file_path
 
 
-def validate_recipe_token(token: str | None = None) -> str:
-    """
-    Args:
-        token (Optional[str], optional): _description_. Defaults to None.
-
-    Raises:
-        HTTPException: 400 Bad Request when no token or the recipe doesn't exist
-        HTTPException: 401 JWTError when token is invalid
-
-    Returns:
-        str: token data
-    """
-    if not token:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST)
-
-    try:
-        payload = jwt.decode(token, settings.SECRET, algorithms=[ALGORITHM])
-        slug: str | None = payload.get("slug")
-    except JWTError as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="could not validate file token",
-        ) from e
-
-    if slug is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST)
-
-    return slug
-
-
-async def temporary_zip_path() -> AsyncGenerator[Path, None]:
+@contextmanager
+def get_temporary_zip_path(auto_unlink=True) -> Generator[Path]:
     app_dirs.TEMP_DIR.mkdir(exist_ok=True, parents=True)
-    temp_path = app_dirs.TEMP_DIR.joinpath("my_zip_archive.zip")
-
+    temp_path = app_dirs.TEMP_DIR / f"{uuid4().hex}.zip"
     try:
         yield temp_path
     finally:
-        temp_path.unlink(missing_ok=True)
+        if auto_unlink:
+            temp_path.unlink(missing_ok=True)
 
 
-async def temporary_dir() -> AsyncGenerator[Path, None]:
+@contextmanager
+def get_temporary_path(auto_unlink=True) -> Generator[Path]:
     temp_path = app_dirs.TEMP_DIR.joinpath(uuid4().hex)
     temp_path.mkdir(exist_ok=True, parents=True)
-
     try:
         yield temp_path
     finally:
-        shutil.rmtree(temp_path)
+        if auto_unlink:
+            rmtree(temp_path)
 
 
-def temporary_file(ext: str = "") -> Callable[[], Generator[tempfile._TemporaryFileWrapper, None, None]]:
+def temporary_file(ext: str = "") -> Callable[[], Generator[tempfile._TemporaryFileWrapper]]:
     """
     Returns a temporary file with the specified extension
     """

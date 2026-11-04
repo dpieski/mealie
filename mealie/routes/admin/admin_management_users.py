@@ -1,11 +1,12 @@
 from functools import cached_property
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import UUID4
 
 from mealie.core import security
 from mealie.routes._base import BaseAdminController, controller
 from mealie.routes._base.mixins import HttpRepo
+from mealie.routes._base.permissions import forbidden
 from mealie.schema.response.pagination import PaginationQuery
 from mealie.schema.response.responses import ErrorResponse
 from mealie.schema.user.auth import UnlockResults
@@ -14,7 +15,7 @@ from mealie.schema.user.user_passwords import ForgotPassword, PasswordResetToken
 from mealie.services.user_services.password_reset_service import PasswordResetService
 from mealie.services.user_services.user_service import UserService
 
-router = APIRouter(prefix="/users", tags=["Admin: Users"])
+router = APIRouter(prefix="/users")
 
 
 @controller(router)
@@ -37,11 +38,16 @@ class AdminUserManagementRoutes(BaseAdminController):
             override=UserOut,
         )
 
-        response.set_pagination_guides(router.url_path_for("get_all"), q.dict())
+        response.set_pagination_guides(router.url_path_for("get_all"), q.model_dump())
         return response
 
     @router.post("", response_model=UserOut, status_code=201)
     def create_one(self, data: UserIn):
+        if self.repos.users.get_by_username(data.username):
+            raise HTTPException(status.HTTP_409_CONFLICT, {"message": self.t("exceptions.username-conflict-error")})
+        elif self.repos.users.get_one(data.email, "email"):
+            raise HTTPException(status.HTTP_409_CONFLICT, {"message": self.t("exceptions.email-conflict-error")})
+
         data.password = security.hash_password(data.password)
         return self.mixins.create_one(data)
 
@@ -60,7 +66,7 @@ class AdminUserManagementRoutes(BaseAdminController):
     def update_one(self, item_id: UUID4, data: UserOut):
         # Prevent self demotion
         if self.user.id == item_id and self.user.admin != data.admin:
-            raise HTTPException(status_code=403, detail=ErrorResponse.respond("you cannot demote yourself"))
+            raise forbidden("you cannot demote yourself")
 
         return self.mixins.update_one(data, item_id)
 

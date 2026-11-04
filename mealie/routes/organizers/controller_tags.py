@@ -5,10 +5,11 @@ from pydantic import UUID4
 
 from mealie.routes._base import BaseCrudController, controller
 from mealie.routes._base.mixins import HttpRepo
+from mealie.routes._base.permissions import Perm, require
 from mealie.schema import mapper
 from mealie.schema.recipe import RecipeTagResponse, TagIn
 from mealie.schema.recipe.recipe import RecipeTag, RecipeTagPagination
-from mealie.schema.recipe.recipe_category import TagSave
+from mealie.schema.recipe.recipe_category import TagMerge, TagOut, TagSave
 from mealie.schema.response.pagination import PaginationQuery
 from mealie.services import urls
 from mealie.services.event_bus_service.event_types import EventOperation, EventTagData, EventTypes
@@ -20,7 +21,7 @@ router = APIRouter(prefix="/tags", tags=["Organizer: Tags"])
 class TagController(BaseCrudController):
     @cached_property
     def repo(self):
-        return self.repos.tags.by_group(self.group_id)
+        return self.repos.tags
 
     @cached_property
     def mixins(self):
@@ -35,7 +36,7 @@ class TagController(BaseCrudController):
             search=search,
         )
 
-        response.set_pagination_guides(router.url_path_for("get_all"), q.dict())
+        response.set_pagination_guides(router.url_path_for("get_all"), q.model_dump())
         return response
 
     @router.get("/empty")
@@ -43,21 +44,36 @@ class TagController(BaseCrudController):
         """Returns a list of tags that do not contain any recipes"""
         return self.repo.get_empty()
 
+    @router.post("/merge", response_model=TagOut, dependencies=[require(Perm.GROUP_ORGANIZE)])
+    def merge_tags(self, body: TagMerge):
+        """Merges the from_id tag into the to_id tag, then deletes from_id."""
+        if body.from_id == body.to_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "from_id and to_id must be different")
+
+        if not self.repo.get_one(body.from_id):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "from_id tag not found")
+        if not self.repo.get_one(body.to_id):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "to_id tag not found")
+
+        return self.repo.merge(body.from_id, body.to_id)
+
     @router.get("/{item_id}", response_model=RecipeTagResponse)
     def get_one(self, item_id: UUID4):
         """Returns a list of recipes associated with the provided tag."""
         return self.mixins.get_one(item_id)
 
-    @router.post("", status_code=201)
+    @router.post("", status_code=201, dependencies=[require(Perm.GROUP_ORGANIZE)])
     def create_one(self, tag: TagIn):
         """Creates a Tag in the database"""
         save_data = mapper.cast(tag, TagSave, group_id=self.group_id)
-        new_tag = self.repo.create(save_data)
+        new_tag = self.mixins.create_one(save_data)
 
         if new_tag:
             self.publish_event(
                 event_type=EventTypes.tag_created,
                 document_data=EventTagData(operation=EventOperation.create, tag_id=new_tag.id),
+                group_id=new_tag.group_id,
+                household_id=None,
                 message=self.t(
                     "notifications.generic-created-with-url",
                     name=new_tag.name,
@@ -67,7 +83,7 @@ class TagController(BaseCrudController):
 
         return new_tag
 
-    @router.put("/{item_id}", response_model=RecipeTagResponse)
+    @router.put("/{item_id}", response_model=RecipeTagResponse, dependencies=[require(Perm.GROUP_ORGANIZE)])
     def update_one(self, item_id: UUID4, new_tag: TagIn):
         """Updates an existing Tag in the database"""
         save_data = mapper.cast(new_tag, TagSave, group_id=self.group_id)
@@ -77,6 +93,8 @@ class TagController(BaseCrudController):
             self.publish_event(
                 event_type=EventTypes.tag_updated,
                 document_data=EventTagData(operation=EventOperation.update, tag_id=tag.id),
+                group_id=tag.group_id,
+                household_id=None,
                 message=self.t(
                     "notifications.generic-updated-with-url",
                     name=tag.name,
@@ -86,14 +104,13 @@ class TagController(BaseCrudController):
 
         return tag
 
-    @router.delete("/{item_id}")
+    @router.delete("/{item_id}", dependencies=[require(Perm.GROUP_ORGANIZE)])
     def delete_recipe_tag(self, item_id: UUID4):
         """
         Removes a recipe tag from the database. Deleting a
         tag does not impact a recipe. The tag will be removed
         from any recipes that contain it
         """
-
         try:
             tag = self.repo.delete(item_id)
         except Exception as e:
@@ -103,6 +120,8 @@ class TagController(BaseCrudController):
             self.publish_event(
                 event_type=EventTypes.tag_deleted,
                 document_data=EventTagData(operation=EventOperation.delete, tag_id=tag.id),
+                group_id=tag.group_id,
+                household_id=None,
                 message=self.t("notifications.generic-deleted", name=tag.name),
             )
 

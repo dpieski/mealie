@@ -1,23 +1,29 @@
-FROM node:16 as builder
+###############################################
+# Frontend Build
+###############################################
+FROM node:24@sha256:e7add2a490bb17d97b485b8641bd88455fff7839ade0f5eba493c3508124d413 \
+    AS frontend-builder
 
-WORKDIR /app
+RUN npm install --global pnpm@11
 
-COPY ./frontend .
+WORKDIR /frontend
 
-RUN yarn install \
-    --prefer-offline \
-    --frozen-lockfile \
-    --non-interactive \
-    --production=false \
-    # https://github.com/docker/build-push-action/issues/471
-    --network-timeout 1000000
+COPY frontend .
 
-RUN yarn generate
+# The lang files import the seeded ingredient unit names, which live with the backend rather
+# than in frontend/. Copy them to the same path they occupy in the repo, so the relative import
+# in app/lang/locales/*.ts resolves identically here and in local dev.
+COPY mealie/repos/seed/resources/units/locales /mealie/repos/seed/resources/units/locales
+
+RUN pnpm clean-install
+
+RUN pnpm generate
 
 ###############################################
 # Base Image - Python
 ###############################################
-FROM python:3.10-slim as python-base
+FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 \
+    AS python-base
 
 ENV MEALIE_HOME="/app"
 
@@ -26,14 +32,10 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=off \
     PIP_DISABLE_PIP_VERSION_CHECK=on \
     PIP_DEFAULT_TIMEOUT=100 \
-    POETRY_HOME="/opt/poetry" \
-    POETRY_VIRTUALENVS_IN_PROJECT=true \
-    POETRY_NO_INTERACTION=1 \
-    PYSETUP_PATH="/opt/pysetup" \
-    VENV_PATH="/opt/pysetup/.venv"
+    VENV_PATH="/opt/mealie"
 
-# prepend poetry and venv to path
-ENV PATH="$POETRY_HOME/bin:$VENV_PATH/bin:$PATH"
+# prepend venv to path
+ENV PATH="$VENV_PATH/bin:$PATH"
 
 # create user account
 RUN useradd -u 911 -U -d $MEALIE_HOME -s /bin/bash abc \
@@ -41,44 +43,87 @@ RUN useradd -u 911 -U -d $MEALIE_HOME -s /bin/bash abc \
     && mkdir $MEALIE_HOME
 
 ###############################################
-# Builder Image
+# Backend Package Build
 ###############################################
-FROM python-base as builder-base
+FROM python-base AS backend-builder
 RUN apt-get update \
     && apt-get install --no-install-recommends -y \
     curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install uv
+
+# Install from the committed lockfile; never re-resolve. The rolling
+# `exclude-newer` cooling window (pyproject [tool.uv]) would otherwise make
+# `uv export` below re-resolve and fail on in-window pins.
+ENV UV_FROZEN=1
+
+WORKDIR /mealie
+
+# copy project files here to ensure they will be cached.
+COPY uv.lock pyproject.toml ./
+COPY mealie ./mealie
+
+# Copy frontend to package it into the wheel
+COPY --from=frontend-builder /frontend/dist ./mealie/frontend
+
+# Build the source and binary package
+RUN uv build --out-dir dist
+
+# dependencies.txt changes only when uv.lock does, so the venv build can cache
+# the install. requirements.txt adds the wheel that was just built, so an
+# install from it gets that exact one.
+RUN uv export --no-dev --no-editable --no-emit-project --extra pgsql --format requirements-txt --output-file dist/dependencies.txt \
+    && cp dist/dependencies.txt dist/requirements.txt \
+    && MEALIE_VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])") \
+    && echo "mealie[pgsql]==${MEALIE_VERSION} \\" >> dist/requirements.txt \
+    && pip hash dist/mealie-${MEALIE_VERSION}-py3-none-any.whl | tail -n1 | tr -d '\n' >> dist/requirements.txt \
+    && echo " \\" >> dist/requirements.txt \
+    && pip hash dist/mealie-${MEALIE_VERSION}.tar.gz | tail -n1 >> dist/requirements.txt
+
+###############################################
+# Package Container
+# Only role is to hold the packages, or be overriden by a --build-context flag.
+###############################################
+FROM scratch AS packages
+COPY --from=backend-builder /mealie/dist /
+
+###############################################
+# Python Virtual Environment Build
+###############################################
+# Install packages required to build the venv, in parallel to building the wheel
+FROM python-base AS venv-builder-base
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y \
     build-essential \
     libpq-dev \
     libwebp-dev \
-    tesseract-ocr-all \
+    ffmpeg \
     # LDAP Dependencies
     libsasl2-dev libldap2-dev libssl-dev \
     gnupg gnupg2 gnupg1 \
-    && rm -rf /var/lib/apt/lists/* \
-    && pip install -U --no-cache-dir pip
+    && rm -rf /var/lib/apt/lists/*
+RUN python3 -m venv --upgrade-deps $VENV_PATH
 
-# install poetry - respects $POETRY_VERSION & $POETRY_HOME
-ENV POETRY_VERSION=1.3.1
-RUN curl -sSL https://install.python-poetry.org | python3 -
+# Install the wheel and all dependencies into the venv
+FROM venv-builder-base AS venv-builder
 
-# copy project requirement files here to ensure they will be cached.
-WORKDIR $PYSETUP_PATH
-COPY ./poetry.lock ./pyproject.toml ./
+# Cache key is dependencies.txt, so a mealie-only commit reuses this layer.
+COPY --from=packages dependencies.txt /dist/dependencies.txt
+RUN . $VENV_PATH/bin/activate \
+    && pip install --require-hashes -r /dist/dependencies.txt
 
-# install runtime deps - uses $POETRY_VIRTUALENVS_IN_PROJECT internally
-RUN poetry install -E pgsql --only main
+# Copy built package (wheel) and its dependency requirements
+COPY --from=packages * /dist/
 
-###############################################
-# CRFPP Image
-###############################################
-FROM hkotel/crfpp as crfpp
-
-RUN echo "crfpp-container"
+# The dependencies are already in place, so pip only installs mealie itself.
+RUN . $VENV_PATH/bin/activate \
+    && pip install --require-hashes -r /dist/requirements.txt --find-links /dist
 
 ###############################################
 # Production Image
 ###############################################
-FROM python-base as production
+FROM python-base AS production
 ENV PRODUCTION=true
 ENV TESTING=false
 
@@ -87,56 +132,39 @@ ENV GIT_COMMIT_HASH=$COMMIT
 
 RUN apt-get update \
     && apt-get install --no-install-recommends -y \
+    curl \
+    ffmpeg \
     gosu \
     iproute2 \
-    tesseract-ocr-all \
     libldap-common \
+    libldap2 \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# copying poetry and venv into image
-COPY --from=builder-base $POETRY_HOME $POETRY_HOME
-COPY --from=builder-base $PYSETUP_PATH $PYSETUP_PATH
+# create directory used for Docker Secrets
+RUN mkdir -p /run/secrets
 
-ENV LD_LIBRARY_PATH=/usr/local/lib
-COPY --from=crfpp /usr/local/lib/ /usr/local/lib
-COPY --from=crfpp /usr/local/bin/crf_learn /usr/local/bin/crf_learn
-COPY --from=crfpp /usr/local/bin/crf_test /usr/local/bin/crf_test
+# Copy venv into image. It contains a fully-installed mealie backend and frontend.
+COPY --from=venv-builder $VENV_PATH $VENV_PATH
 
-# copy backend
-COPY ./mealie $MEALIE_HOME/mealie
-COPY ./poetry.lock ./pyproject.toml $MEALIE_HOME/
-COPY ./gunicorn_conf.py $MEALIE_HOME
-
-# Alembic
-COPY ./alembic $MEALIE_HOME/alembic
-COPY ./alembic.ini $MEALIE_HOME/
-
-# venv already has runtime deps installed we get a quicker install
-WORKDIR $MEALIE_HOME
-RUN . $VENV_PATH/bin/activate && poetry install -E pgsql --only main
-WORKDIR /
-
-# Grab CRF++ Model Release
-RUN python $MEALIE_HOME/mealie/scripts/install_model.py
+# install nltk data for the ingredient parser
+ENV NLTK_DATA="/nltk_data/"
+COPY ./docker/setup_nltk_data.sh $MEALIE_HOME/setup_nltk_data.sh
+RUN chmod +x $MEALIE_HOME/setup_nltk_data.sh && $MEALIE_HOME/setup_nltk_data.sh
 
 VOLUME [ "$MEALIE_HOME/data/" ]
 ENV APP_PORT=9000
 
 EXPOSE ${APP_PORT}
 
-HEALTHCHECK CMD python $MEALIE_HOME/mealie/scripts/healthcheck.py || exit 1
+COPY ./docker/healthcheck.sh $MEALIE_HOME/healthcheck.sh
+RUN chmod +x $MEALIE_HOME/healthcheck.sh
+HEALTHCHECK CMD $MEALIE_HOME/healthcheck.sh
 
-# ----------------------------------
-# Copy Frontend
-
-# copying caddy into image
-ENV STATIC_FILES=/spa/static
-COPY --from=builder /app/dist  ${STATIC_FILES}
-
-ENV HOST 0.0.0.0
+ENV HOST=0.0.0.0
 
 EXPOSE ${APP_PORT}
 COPY ./docker/entry.sh $MEALIE_HOME/run.sh
 
 RUN chmod +x $MEALIE_HOME/run.sh
-ENTRYPOINT $MEALIE_HOME/run.sh
+ENTRYPOINT ["/app/run.sh"]

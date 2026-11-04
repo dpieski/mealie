@@ -1,129 +1,134 @@
-[tool.poetry]
-authors = ["Hayden <hay-kot@pm.me>"]
-description = "A Recipe Manager"
-license = "AGPL"
+[project]
 name = "mealie"
-version = "1.0.0b"
+version = "3.30.0"
+description = "A Recipe Manager"
+authors = [{ name = "Hayden", email = "hay-kot@pm.me" }]
+license = "AGPL-3.0-only"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+    "Jinja2==3.1.6",
+    "Pillow==13.0.0",
+    "PyYAML==6.0.3",
+    "SQLAlchemy==2.1.6",
+    "alembic==1.20.1",
+    "apprise==2.1.0",
+    "bcrypt==5.0.0",
+    "extruct==0.18.0",
+    "fastapi==0.162.0",
+    "httpx==0.28.1",
+    "lxml==6.1.3",
+    "orjson==3.13.0",
+    "pydantic==2.14.2",
+    "pyhumps==3.8.0",
+    "python-dateutil==3.0.0",
+    "python-dotenv==1.2.4",
+    "python-ldap==3.4.8",
+    "python-multipart==0.0.32",
+    "python-slugify==9.1.3",
+    "recipe-scrapers==15.13.0",
+    "requests==2.34.2",
+    "tzdata==2026.6",
+    "uvicorn[standard]==0.54.0",
+    "beautifulsoup4==4.15.0",
+    "isodate==0.7.2",
+    "text-unidecode==1.3",
+    "rapidfuzz==3.14.6",
+    "authlib==1.9.1",
+    "html2text==2025.4.15",
+    "paho-mqtt==2.1.0",
+    "pydantic-settings==2.16.2",
+    "pillow-heif==1.8.1",
+    "pyjwt==2.15.1",
+    "openai==3.41.0",
+    "typing-extensions==4.16.0",
+    "itsdangerous==2.2.0",
+    "yt-dlp==2026.10.26",
+    "ingredient-parser-nlp==2.9.1",
+    "pint==0.26.2",
+    "httpx-curl-cffi==0.1.5",
+]
 
-[tool.poetry.scripts]
-start = "mealie.app:main"
+[project.scripts]
+mealie = "mealie.main:main"
 
-[tool.poetry.dependencies]
-Jinja2 = "^3.1.2"
-Pillow = "^10.0.1"
-PyYAML = "^6.0.1"
-SQLAlchemy = "^2"
-aiofiles = "^23.0.0"
-alembic = "^1.11.3"
-aniso8601 = "9.0.1"
-appdirs = "1.4.4"
-apprise = "^1.4.5"
-bcrypt = "^4.0.1"
-extruct = "^0.14.0"
-fastapi = "^0.103.2"
-gunicorn = "^20.1.0"
-httpx = "^0.24.1"
-lxml = "^4.7.1"
-orjson = "^3.8.0"
-passlib = "^1.7.4"
-psycopg2-binary = { version = "^2.9.1", optional = true }
-pydantic = "^1.10.4"
-pyhumps = "^3.5.3"
-pytesseract = "^0.3.9"
-python = "^3.10"
-python-dateutil = "^2.8.2"
-python-dotenv = "^1.0.0"
-python-jose = "^3.3.0"
-python-ldap = "^3.3.1"
-python-multipart = "^0.0.6"
-python-slugify = "^8.0.0"
-recipe-scrapers = "^14.42.0"
-requests = "^2.31.0"
-tzdata = "^2022.7"
-uvicorn = { extras = ["standard"], version = "^0.21.0" }
-beautifulsoup4 = "^4.11.2"
-isodate = "^0.6.1"
-text-unidecode = "^1.3"
-rapidfuzz = "^3.2.0"
+[project.optional-dependencies]
+pgsql = [
+    "psycopg2-binary==2.9.13"
+]
 
-[tool.poetry.group.dev.dependencies]
-black = "^23.7.0"
-coverage = "^7.0"
-coveragepy-lcov = "^0.1.1"
-mkdocs-material = "^9.0.0"
-mypy = "^1.5.1"
-pre-commit = "^3.3.3"
-pydantic-to-typescript = "^1.0.7"
-pylint = "^2.6.0"
-pytest = "^7.2.0"
-pytest-asyncio = "^0.21.0"
-rich = "^13.5.2"
-ruff = "^0.0.265"
-types-PyYAML = "^6.0.4"
-types-python-dateutil = "^2.8.18"
-types-python-slugify = "^6.0.0"
-types-requests = "^2.27.12"
-types-urllib3 = "^1.26.11"
-
+[dependency-groups]
+docs = [
+    "zensical==0.0.73",
+]
+dev = [
+    "coverage==7.17.0",
+    "coveragepy-lcov==0.1.2",
+    "mypy==2.4.1",
+    "pre-commit==4.7.0",
+    "pylint==4.1.3",
+    "pytest==9.2.0",
+    "pytest-asyncio==1.4.1",
+    "rich==15.0.0",
+    "ruff==0.17.3",
+    "types-PyYAML==6.0.12.20261030",
+    "types-python-dateutil==2.9.0.20261029",
+    "types-python-slugify==8.0.2.20240310",
+    "types-requests==2.33.0.20261030",
+    "types-urllib3==1.26.25.14",
+    "pydantic-to-typescript2==1.0.6",
+    "freezegun==1.5.5",
+    "httpx2==2.16.0",
+    "zensical==0.0.73",
+    "pytest-xdist==3.8.0",
+]
 
 [build-system]
-build-backend = "poetry.core.masonry.api"
-requires = ["poetry-core>=1.0.0"]
+requires = ["setuptools==84.2.1"]
+build-backend = "setuptools.build_meta"
 
-[tool.black]
-line-length = 120
-target-version = ["py310"]
+[tool.setuptools]
+include-package-data = true
 
-[tool.isort]
-line_length = 120
+[tool.setuptools.packages.find]
+include = ["mealie*"]
 
-[tool.vulture]
-exclude = ["**/models/**/*.py", "dir/"]
-ignore_decorators = ["@*router.*", "@app.on_event", "@validator", "@controller"]
-make_whitelist = true
-min_confidence = 60
-paths = ["mealie"]
-sort_by_size = true
+[tool.setuptools.package-data]
+"*" = ["*"]
 
 [tool.pytest.ini_options]
 addopts = "-ra -q"
+asyncio_default_fixture_loop_scope = "function"
 minversion = "6.0"
 python_classes = '*Tests'
 python_files = 'test_*'
 python_functions = 'test_*'
 testpaths = ["tests"]
+filterwarnings = [
+    # Treat every warning not explicitly ignored below as a test failure.
+    "error",
+    # Suppress unmaintained third-party pyRdfa utcnow() deprecation warning
+    "ignore::DeprecationWarning:pyRdfa.*",
+    # Suppress Python 3.12 default SQLite datetime-adapter deprecation warning
+    "ignore:The default datetime adapter is deprecated as of Python 3.12:DeprecationWarning",
+    # Suppress anyio 4.15 BlockingPortal alias deprecation from starlette.testclient.
+    # Fixed in starlette 1.7.0; drop this once that version clears the exclude-newer window.
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+]
 
 [tool.coverage.report]
 skip_empty = true
-
-[tool.poetry.extras]
-pgsql = ["psycopg2-binary"]
 
 [tool.mypy]
 follow_imports = "skip"
 ignore_missing_imports = true
 plugins = "pydantic.mypy"
-python_version = "3.10"
+python_version = "3.14"
 strict_optional = true
 
 [tool.ruff]
+target-version = "py314"
 line-length = 120
-format = "text"
-
-# Enable Pyflakes `E` and `F` codes by default.
-ignore = ["F403", "TID252", "B008"]
-select = [
-  "E",  # pycodestyles
-  "F",  # pyflakes
-  "I",  # isort
-  "T",  # flake8-print
-  "UP", # pyupgrade
-  "B",  # flake8-bugbear
-  # "ANN", # flake8-annotations
-  # "C", # McCabe complexity
-  # "RUF", # Ruff specific
-  # "BLE", # blind-except
-]
+output-format = "concise"
 
 # Exclude a variety of commonly ignored directories.
 exclude = [
@@ -148,12 +153,42 @@ exclude = [
   "venv",
 ]
 
-# Assume Python 3.10.
-target-version = "py310"
+[tool.ruff.lint.isort]
+known-third-party = ["alembic"]
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint]
+# Enable Pyflakes `E` and `F` codes by default.
+ignore = ["F403", "TID252", "B008"]
+select = [
+  "B",  # flake8-bugbear
+  "C4", # McCabe complexity
+  "C90", # flake8-comprehensions
+  "DTZ", # flake8-datetimez
+  "E",  # pycodestyles
+  "F",  # pyflakes
+  "I",  # isort
+  "T",  # flake8-print
+  "UP", # pyupgrade
+  # "ANN", # flake8-annotations
+  # "BLE", # blind-except
+  # "RUF", # Ruff specific
+]
+
+[tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["E402", "E501"]
+"mealie/alembic/versions/*" = ["E501", "I001"]
+"dev/scripts/all_recipes_stress_test.py" = ["E501"]
+"ldap_provider.py" = ["UP032"]
+"tests/conftest.py" = ["E402"]
+"tests/utils/routes/__init__.py" = ["F401"]
 
-[tool.ruff.mccabe]
+[tool.ruff.lint.mccabe]
 # Unlike Flake8, default to a complexity level of 10.
-max-complexity = 10
+max-complexity = 24  # Default is 10.
+
+[tool.uv]
+add-bounds = "exact"
+# Cooling period: ignore package releases newer than 5 days to mitigate
+# supply-chain attacks (compromised releases are usually caught and yanked
+# within days). Evaluated at resolve time as a rolling window.
+exclude-newer = "5 days"

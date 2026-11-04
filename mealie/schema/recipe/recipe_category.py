@@ -1,4 +1,4 @@
-from pydantic import UUID4
+from pydantic import UUID4, ConfigDict
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.interfaces import LoaderOption
 
@@ -16,25 +16,26 @@ class CategorySave(CategoryIn):
 
 class CategoryBase(CategoryIn):
     id: UUID4
+    group_id: UUID4 | None = None
     slug: str
-
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CategoryOut(CategoryBase):
     slug: str
     group_id: UUID4
+    recipe_count: int = 0
+    model_config = ConfigDict(from_attributes=True)
 
-    class Config:
-        orm_mode = True
+
+class CategoryMerge(MealieModel):
+    from_id: UUID4
+    to_id: UUID4
 
 
 class RecipeCategoryResponse(CategoryBase):
-    recipes: "list[RecipeSummary]" = []
-
-    class Config:
-        orm_mode = True
+    recipes: list[RecipeSummary] = []
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TagIn(CategoryIn):
@@ -52,9 +53,13 @@ class TagBase(CategoryBase):
 class TagOut(TagSave):
     id: UUID4
     slug: str
+    recipe_count: int = 0
+    model_config = ConfigDict(from_attributes=True)
 
-    class Config:
-        orm_mode = True
+
+class TagMerge(MealieModel):
+    from_id: UUID4
+    to_id: UUID4
 
 
 class RecipeTagResponse(RecipeCategoryResponse):
@@ -69,5 +74,5 @@ class RecipeTagResponse(RecipeCategoryResponse):
 
 from mealie.schema.recipe.recipe import RecipeSummary  # noqa: E402
 
-RecipeCategoryResponse.update_forward_refs()
-RecipeTagResponse.update_forward_refs()
+RecipeCategoryResponse.model_rebuild()
+RecipeTagResponse.model_rebuild()

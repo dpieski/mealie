@@ -1,11 +1,17 @@
-import uuid
-from datetime import date, datetime
-from enum import Enum, auto
-from typing import Any
+from __future__ import annotations
 
-from pydantic import UUID4
+import datetime as dt
+import uuid
+from datetime import UTC, date, datetime
+from enum import Enum, auto
+from typing import TYPE_CHECKING, Any
+
+from pydantic import UUID4, SerializeAsAny, field_validator
 
 from ...schema._mealie.mealie_model import MealieModel
+
+if TYPE_CHECKING:
+    from mealie.lang.providers import Translator
 
 INTERNAL_INTEGRATION_ID = "mealie_generic_user"
 
@@ -36,6 +42,8 @@ class EventTypes(Enum):
     data_import = auto()
 
     mealplan_entry_created = auto()
+    mealplan_entry_updated = auto()
+    mealplan_entry_deleted = auto()
 
     shopping_list_created = auto()
     shopping_list_updated = auto()
@@ -53,6 +61,10 @@ class EventTypes(Enum):
     category_updated = auto()
     category_deleted = auto()
 
+    label_created = auto()
+    label_updated = auto()
+    label_deleted = auto()
+
 
 class EventDocumentType(Enum):
     generic = "generic"
@@ -68,6 +80,7 @@ class EventDocumentType(Enum):
     recipe_bulk_report = "recipe_bulk_report"
     recipe_timeline_event = "recipe_timeline_event"
     tag = "tag"
+    label = "label"
 
 
 class EventOperation(Enum):
@@ -84,80 +97,90 @@ class EventDocumentDataBase(MealieModel):
     ...
 
 
-class EventMealplanCreatedData(EventDocumentDataBase):
-    document_type = EventDocumentType.mealplan
-    operation = EventOperation.create
+class EventMealplanData(EventDocumentDataBase):
+    document_type: EventDocumentType = EventDocumentType.mealplan
     mealplan_id: int
     date: date
-    recipe_id: UUID4 | None
-    recipe_name: str | None
-    recipe_slug: str | None
+    end_date: dt.date | None = None
+    recipe_id: UUID4 | None = None
+    recipe_name: str | None = None
+    recipe_slug: str | None = None
 
 
 class EventUserSignupData(EventDocumentDataBase):
-    document_type = EventDocumentType.user
-    operation = EventOperation.create
+    document_type: EventDocumentType = EventDocumentType.user
+    operation: EventOperation = EventOperation.create
     username: str
     email: str
 
 
 class EventCategoryData(EventDocumentDataBase):
-    document_type = EventDocumentType.category
+    document_type: EventDocumentType = EventDocumentType.category
     category_id: UUID4
 
 
+class EventLabelData(EventDocumentDataBase):
+    document_type: EventDocumentType = EventDocumentType.label
+    label_id: UUID4
+
+
 class EventCookbookData(EventDocumentDataBase):
-    document_type = EventDocumentType.cookbook
+    document_type: EventDocumentType = EventDocumentType.cookbook
     cookbook_id: UUID4
 
 
 class EventCookbookBulkData(EventDocumentDataBase):
-    document_type = EventDocumentType.cookbook
+    document_type: EventDocumentType = EventDocumentType.cookbook
     cookbook_ids: list[UUID4]
 
 
 class EventShoppingListData(EventDocumentDataBase):
-    document_type = EventDocumentType.shopping_list
+    document_type: EventDocumentType = EventDocumentType.shopping_list
     shopping_list_id: UUID4
 
 
 class EventShoppingListItemData(EventDocumentDataBase):
-    document_type = EventDocumentType.shopping_list_item
+    document_type: EventDocumentType = EventDocumentType.shopping_list_item
     shopping_list_id: UUID4
     shopping_list_item_id: UUID4
 
 
 class EventShoppingListItemBulkData(EventDocumentDataBase):
-    document_type = EventDocumentType.shopping_list_item
+    document_type: EventDocumentType = EventDocumentType.shopping_list_item
     shopping_list_id: UUID4
     shopping_list_item_ids: list[UUID4]
 
 
 class EventRecipeData(EventDocumentDataBase):
-    document_type = EventDocumentType.recipe
+    document_type: EventDocumentType = EventDocumentType.recipe
     recipe_slug: str
 
 
+class EventRecipeBulkData(EventDocumentDataBase):
+    document_type: EventDocumentType = EventDocumentType.recipe
+    recipe_slugs: list[str]
+
+
 class EventRecipeBulkReportData(EventDocumentDataBase):
-    document_type = EventDocumentType.recipe_bulk_report
+    document_type: EventDocumentType = EventDocumentType.recipe_bulk_report
     report_id: UUID4
 
 
 class EventRecipeTimelineEventData(EventDocumentDataBase):
-    document_type = EventDocumentType.recipe_timeline_event
+    document_type: EventDocumentType = EventDocumentType.recipe_timeline_event
     recipe_slug: str
     recipe_timeline_event_id: UUID4
 
 
 class EventTagData(EventDocumentDataBase):
-    document_type = EventDocumentType.tag
+    document_type: EventDocumentType = EventDocumentType.tag
     tag_id: UUID4
 
 
 class EventWebhookData(EventDocumentDataBase):
     webhook_start_dt: datetime
     webhook_end_dt: datetime
-    webhook_body: Any
+    webhook_body: Any = None
 
 
 class EventBusMessage(MealieModel):
@@ -165,22 +188,39 @@ class EventBusMessage(MealieModel):
     body: str = ""
 
     @classmethod
-    def from_type(cls, event_type: EventTypes, body: str = "") -> "EventBusMessage":
-        title = event_type.name.replace("_", " ").title()
+    def from_type(
+        cls,
+        event_type: EventTypes,
+        body: str = "",
+        translator: Translator | None = None,
+    ) -> EventBusMessage:
+        fallback_title = event_type.name.replace("_", " ").title()
+
+        if translator:
+            event_name = event_type.name.replace("_", "-")
+            title = translator.t(f"notifications.event-title.{event_name}", default=fallback_title)
+        else:
+            title = fallback_title
+
         return cls(title=title, body=body)
+
+    @field_validator("body")
+    def populate_body(v):
+        # if the body is empty, apprise won't send the notification
+        return v or "generic"
 
 
 class Event(MealieModel):
     message: EventBusMessage
     event_type: EventTypes
     integration_id: str
-    document_data: EventDocumentDataBase
+    document_data: SerializeAsAny[EventDocumentDataBase]
 
     # set at instantiation
-    event_id: UUID4 | None
-    timestamp: datetime | None
+    event_id: UUID4 | None = None
+    timestamp: datetime | None = None
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.event_id = uuid.uuid4()
-        self.timestamp = datetime.now()
+        self.timestamp = datetime.now(UTC)
